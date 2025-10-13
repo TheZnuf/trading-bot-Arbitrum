@@ -1,0 +1,13 @@
+{
+  "name": "dca-wbtc-bot",
+  "version": "1.0.0",
+  "description": "Bot DCA pour acheter du WBTC sur Arbitrum",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "ethers": "^6.9.0",
+    "dotenv": "^16.3.1"
+  }
+}
