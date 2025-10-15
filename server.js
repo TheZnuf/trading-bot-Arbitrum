@@ -39,6 +39,7 @@ let PAIRS = [
     decimals: 8,
     purchaseAmount: '1000',
     maxPurchases: 10,
+    dropPercentage: 2,
     fee: 3000,
     enabled: true
   },
@@ -49,6 +50,7 @@ let PAIRS = [
     decimals: 18,
     purchaseAmount: '500',
     maxPurchases: 15,
+    dropPercentage: 2,
     fee: 500,
     enabled: true
   },
@@ -59,6 +61,7 @@ let PAIRS = [
     decimals: 18,
     purchaseAmount: '300',
     maxPurchases: 20,
+    dropPercentage: 2,
     fee: 3000,
     enabled: true
   },
@@ -69,6 +72,7 @@ let PAIRS = [
     decimals: 18,
     purchaseAmount: '400',
     maxPurchases: 12,
+    dropPercentage: 2,
     fee: 3000,
     enabled: true
   },
@@ -79,6 +83,7 @@ let PAIRS = [
     decimals: 9,
     purchaseAmount: '600',
     maxPurchases: 10,
+    dropPercentage: 2,
     fee: 10000,
     enabled: true
   },
@@ -89,6 +94,7 @@ let PAIRS = [
     decimals: 18,
     purchaseAmount: '250',
     maxPurchases: 15,
+    dropPercentage: 2,
     fee: 3000,
     enabled: true
   }
@@ -239,7 +245,10 @@ class PairTracker {
     
     const priceChange = ((currentPrice - this.lastPurchasePrice) / this.lastPurchasePrice) * 100;
     
-    if (priceChange <= -CONFIG.DROP_PERCENTAGE) {
+    // Utiliser le dropPercentage de la paire
+    const dropThreshold = this.config.dropPercentage || CONFIG.DROP_PERCENTAGE;
+    
+    if (priceChange <= -dropThreshold) {
       this.emitLog('success', `[${this.config.name}] 🎯 Déclenchement! Baisse de ${Math.abs(priceChange).toFixed(2)}%`);
       await this.executePurchase();
     }
@@ -253,6 +262,7 @@ class PairTracker {
       lastPurchasePrice: this.lastPurchasePrice,
       purchaseCount: this.purchaseCount,
       balance: this.balance,
+      dropPercentage: this.config.dropPercentage,
       priceChange: this.lastPurchasePrice && this.currentPrice 
         ? ((this.currentPrice - this.lastPurchasePrice) / this.lastPurchasePrice) * 100 
         : 0
