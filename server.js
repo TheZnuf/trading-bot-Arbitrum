@@ -124,6 +124,7 @@ class PairTracker {
     this.contracts = contracts;
     this.emitLog = emitLog;
     this.lastPurchasePrice = null;
+    this.ath = null; // ATH depuis le dernier achat
     this.purchaseCount = 0;
     this.currentPrice = null;
     this.balance = '0';
