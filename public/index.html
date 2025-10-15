@@ -14,11 +14,9 @@
             <div>
                 <h1 class="text-4xl font-bold mb-2">🤖 DCA Bot Manager</h1>
                 <p class="text-gray-400">Gestion multi-paires sur Arbitrum</p>
+                <p class="text-xs text-gray-500 mt-1">💡 Configuration : Modifiez le fichier .env puis redémarrez le serveur</p>
             </div>
             <div class="flex gap-4">
-                <button onclick="toggleSettings()" class="px-6 py-3 bg-slate-700 hover:bg-slate-600 rounded-lg transition">
-                    ⚙️ Paramètres
-                </button>
                 <button id="startStopBtn" onclick="toggleBot()" class="px-6 py-3 bg-green-600 hover:bg-green-500 rounded-lg font-semibold transition">
                     ▶️ Démarrer
                 </button>
@@ -26,41 +24,7 @@
         </div>
 
         <!-- Settings Panel -->
-        <div id="settingsPanel" class="bg-slate-800 rounded-lg p-6 mb-6 border border-slate-700 hidden">
-            <h2 class="text-2xl font-bold mb-4">⚙️ Configuration Globale</h2>
-            <div class="grid grid-cols-2 gap-4 mb-4">
-                <div>
-                    <label class="block text-sm text-gray-400 mb-2">RPC URL Arbitrum</label>
-                    <input type="text" id="rpcUrl" placeholder="https://arb-mainnet.g.alchemy.com/v2/..." 
-                           class="w-full px-4 py-2 bg-slate-700 rounded border border-slate-600 focus:border-purple-500 outline-none">
-                </div>
-                <div>
-                    <label class="block text-sm text-gray-400 mb-2">Clé Privée</label>
-                    <input type="password" id="privateKey" placeholder="0x..." 
-                           class="w-full px-4 py-2 bg-slate-700 rounded border border-slate-600 focus:border-purple-500 outline-none">
-                </div>
-                <div>
-                    <label class="block text-sm text-gray-400 mb-2">% de baisse pour achat</label>
-                    <input type="number" id="dropPercentage" value="2" 
-                           class="w-full px-4 py-2 bg-slate-700 rounded border border-slate-600 focus:border-purple-500 outline-none">
-                </div>
-                <div>
-                    <label class="block text-sm text-gray-400 mb-2">Intervalle (secondes)</label>
-                    <input type="number" id="checkInterval" value="60" 
-                           class="w-full px-4 py-2 bg-slate-700 rounded border border-slate-600 focus:border-purple-500 outline-none">
-                </div>
-                <div>
-                    <label class="block text-sm text-gray-400 mb-2">Slippage toléré (%)</label>
-                    <input type="number" id="slippageTolerance" value="1" 
-                           class="w-full px-4 py-2 bg-slate-700 rounded border border-slate-600 focus:border-purple-500 outline-none">
-                </div>
-                <div class="flex items-end">
-                    <button onclick="saveConfig()" class="w-full px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded transition">
-                        💾 Sauvegarder
-                    </button>
-                </div>
-            </div>
-        </div>
+        <!-- Supprimé: Configuration via .env uniquement -->
 
         <!-- Stats -->
         <div class="grid grid-cols-4 gap-4 mb-6">
@@ -144,10 +108,6 @@
                 config = data;
                 pairs = data.pairs;
                 
-                document.getElementById('dropPercentage').value = data.globalSettings.dropPercentage;
-                document.getElementById('checkInterval').value = data.globalSettings.checkInterval;
-                document.getElementById('slippageTolerance').value = data.globalSettings.slippageTolerance;
-                
                 renderPairs();
                 updateStats();
             } catch (error) {
@@ -155,25 +115,17 @@
             }
         }
 
-        // Save configuration
+        // Save configuration (only pairs config, not global settings)
         async function saveConfig() {
-            const globalSettings = {
-                dropPercentage: parseFloat(document.getElementById('dropPercentage').value),
-                checkInterval: parseInt(document.getElementById('checkInterval').value),
-                slippageTolerance: parseFloat(document.getElementById('slippageTolerance').value),
-                rpcUrl: document.getElementById('rpcUrl').value,
-                privateKey: document.getElementById('privateKey').value
-            };
-
             try {
                 const res = await fetch(`${API_URL}/api/config`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ globalSettings, pairs })
+                    body: JSON.stringify({ pairs })
                 });
                 
                 if (res.ok) {
-                    addLog('success', '✅ Configuration sauvegardée');
+                    addLog('success', '✅ Configuration des paires sauvegardée');
                 }
             } catch (error) {
                 addLog('error', `Erreur de sauvegarde: ${error.message}`);
@@ -396,12 +348,6 @@
         // Clear logs
         function clearLogs() {
             document.getElementById('logs').innerHTML = '';
-        }
-
-        // Toggle settings
-        function toggleSettings() {
-            const panel = document.getElementById('settingsPanel');
-            panel.classList.toggle('hidden');
         }
 
         // Auto-save pairs config on change
