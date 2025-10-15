@@ -1,157 +1,350 @@
-# 🤖 Bot DCA WBTC sur Arbitrum
+# 🤖 Bot DCA Multi-Paires avec Interface Web
 
-Bot de trading automatique qui achète du WBTC (Wrapped Bitcoin) sur Uniswap V3 (Arbitrum) à chaque baisse de 2%.
+Bot de trading automatique DCA (Dollar Cost Averaging) sur Arbitrum avec interface web de gestion en temps réel.
+
+## ✨ Fonctionnalités
+
+- ✅ **Multi-paires** : WBTC, WETH, LINK, AVAX, SOL, LDO
+- ✅ **Interface web moderne** : Gestion visuelle de toutes les paires
+- ✅ **Temps réel** : Mises à jour en direct via WebSocket
+- ✅ **Configuration flexible** : Montants et limites par paire
+- ✅ **Journal d'activité** : Logs en temps réel
+- ✅ **Sécurité** : Limites d'achats configurables
 
 ## 📋 Prérequis
 
-1. **Node.js** (version 18+)
-2. **Un wallet Arbitrum** avec:
-   - ETH pour les frais de gas (~5-10$ recommandés)
+1. **Node.js** version 18 ou supérieure
+2. **Un wallet Arbitrum** avec :
+   - ETH pour les frais de gas (~10$ recommandés)
    - USDC pour les achats
-3. **Un compte RPC** (gratuit):
-   - [Alchemy](https://alchemy.com) ou [Infura](https://infura.io)
+3. **Un RPC Arbitrum** (gratuit sur [Alchemy](https://alchemy.com))
 
 ## 🚀 Installation
 
-### 1. Créer le dossier du projet
+### 1. Créer le projet
+
 ```bash
-mkdir dca-wbtc-bot
-cd dca-wbtc-bot
+mkdir dca-bot
+cd dca-bot
 ```
 
-### 2. Créer les fichiers
-Créez les 3 fichiers suivants dans le dossier:
-- `bot.js` (le code principal)
-- `package.json` (les dépendances)
-- `.env` (votre configuration)
+### 2. Créer la structure des fichiers
+
+```
+dca-bot/
+├── server.js          # Backend API + Bot
+├── package.json       # Dépendances
+├── .env              # Configuration (à créer)
+└── public/
+    └── index.html    # Interface web
+```
 
 ### 3. Installer les dépendances
+
 ```bash
 npm install
 ```
 
 ### 4. Configuration
 
-Créez un fichier `.env` avec:
+Créez un fichier `.env` à la racine :
 
 ```env
+# Configuration obligatoire
+ARBITRUM_RPC_URL=https://arb-mainnet.g.alchemy.com/v2/VOTRE_CLE_API
 PRIVATE_KEY=votre_cle_privee_metamask
-ARBITRUM_RPC_URL=https://arb-mainnet.g.alchemy.com/v2/VOTRE_CLE
-PURCHASE_AMOUNT=1000
-MAX_PURCHASES=10
+
+# Port du serveur (optionnel)
+PORT=3000
 ```
 
-**⚠️ IMPORTANT - Obtenir votre clé privée:**
+**⚠️ Comment obtenir votre clé privée :**
 1. Ouvrez MetaMask
-2. Cliquez sur les 3 points → Détails du compte
+2. Menu (3 points) → Détails du compte
 3. Exporter la clé privée
-4. **NE JAMAIS LA PARTAGER!**
+4. **ATTENTION : Ne la partagez JAMAIS !**
 
-**📡 Obtenir un RPC gratuit (Alchemy):**
-1. Allez sur [alchemy.com](https://alchemy.com)
-2. Créez un compte gratuit
-3. Créez une nouvelle app → Choisir "Arbitrum"
+**📡 Obtenir un RPC gratuit (Alchemy) :**
+1. Créez un compte sur [alchemy.com](https://alchemy.com)
+2. Créez une nouvelle app
+3. Sélectionnez "Arbitrum" → "Arbitrum Mainnet"
 4. Copiez l'URL HTTPS
 
-## ▶️ Lancer le bot
+### 5. Créer le dossier public
+
+```bash
+mkdir public
+```
+
+Placez le fichier `index.html` dans le dossier `public/`.
+
+## ▶️ Démarrage
+
+### Lancer le serveur
 
 ```bash
 npm start
 ```
 
-Le bot va:
-1. Faire un premier achat immédiatement (1000 USDC → WBTC)
-2. Surveiller le prix toutes les 60 secondes
-3. Acheter à nouveau à chaque baisse de 2%
-4. S'arrêter après 10 achats (configurable)
+Vous verrez :
+```
+🚀 Serveur démarré sur http://localhost:3000
+📡 WebSocket disponible sur ws://localhost:3000
+```
 
-## 🛑 Arrêter le bot
+### Accéder à l'interface
 
-Appuyez sur `Ctrl + C`
+Ouvrez votre navigateur : **http://localhost:3000**
+
+## 🎮 Utilisation
+
+### 1. Configuration initiale
+
+1. Cliquez sur **"⚙️ Paramètres"**
+2. Remplissez :
+   - RPC URL (depuis Alchemy)
+   - Clé privée (depuis MetaMask)
+   - Pourcentage de baisse (défaut: 2%)
+   - Intervalle de vérification (défaut: 60s)
+3. Cliquez sur **"💾 Sauvegarder"**
+
+### 2. Configuration des paires
+
+Pour chaque paire, vous pouvez :
+- **ON/OFF** : Activer/désactiver la paire
+- **Montant** : Montant en USDC par achat
+- **Max Achats** : Nombre maximum d'achats
+
+### 3. Lancer le bot
+
+1. Vérifiez que vos paires sont bien configurées
+2. Cliquez sur **"▶️ Démarrer"**
+3. Le bot commence immédiatement à surveiller les prix
+4. Les achats se déclenchent automatiquement à chaque baisse de 2%
+
+### 4. Surveillance
+
+L'interface affiche en temps réel :
+- **Prix actuels** de chaque token
+- **Variations** depuis le dernier achat
+- **Nombre d'achats** effectués
+- **Balance** de chaque token
+- **Logs** de toutes les actions
+
+### 5. Arrêt
+
+Cliquez sur **"⏸️ Arrêter"** pour stopper le bot proprement.
+
+## 📊 Configuration des paires par défaut
+
+| Paire | Montant | Max Achats | Budget Max |
+|-------|---------|------------|------------|
+| WBTC  | 1000 $  | 10         | 10,000 $   |
+| WETH  | 500 $   | 15         | 7,500 $    |
+| LINK  | 300 $   | 20         | 6,000 $    |
+| AVAX  | 400 $   | 12         | 4,800 $    |
+| SOL   | 600 $   | 10         | 6,000 $    |
+| LDO   | 250 $   | 15         | 3,750 $    |
+
+**Budget total maximum : ~38,050 $**
 
 ## ⚙️ Personnalisation
 
-Vous pouvez modifier ces paramètres dans le fichier `.env`:
+### Modifier une paire
 
-- `PURCHASE_AMOUNT`: Montant en USDC par achat (défaut: 1000)
-- `MAX_PURCHASES`: Nombre maximum d'achats (défaut: 10)
+Dans `server.js`, modifiez la section `PAIRS` :
 
-Ou directement dans `bot.js`:
-- `DROP_PERCENTAGE`: Pourcentage de baisse (ligne 14, défaut: 2%)
-- `CHECK_INTERVAL`: Fréquence de vérification en ms (ligne 15, défaut: 60000 = 1 min)
-- `SLIPPAGE_TOLERANCE`: Slippage toléré (ligne 16, défaut: 1%)
-
-## 📊 Exemple de sortie
-
+```javascript
+{
+  id: 1,
+  name: 'WBTC',
+  address: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f',
+  decimals: 8,
+  purchaseAmount: '1000',  // ← Changez ici
+  maxPurchases: 10,        // ← Et ici
+  fee: 3000,
+  enabled: true            // ← false pour désactiver
+}
 ```
-🚀 Initialisation du bot DCA WBTC...
-📍 Wallet: 0x123...abc
-💰 Balance USDC: 10000.00
-₿ Balance WBTC: 0.05
 
-⚙️ Configuration:
-   - Montant par achat: 1000 USDC
-   - Déclenchement: baisse de 2%
-   - Limite d'achats: 10
-   - Slippage toléré: 1%
+### Ajouter une nouvelle paire
 
-▶️ Bot démarré!
+1. Trouvez l'adresse du token sur [Arbiscan](https://arbiscan.io)
+2. Ajoutez dans `PAIRS` :
 
-[13/10/2025 14:30:00] 💹 Prix actuel: 45000.50 USDC/WBTC
-🎯 Premier achat déclenché
+```javascript
+{
+  id: 7,
+  name: 'VOTRE_TOKEN',
+  address: '0x...',        // Adresse du token
+  decimals: 18,            // Nombre de décimales
+  purchaseAmount: '500',
+  maxPurchases: 10,
+  fee: 3000,               // 3000 = 0.3%, 10000 = 1%
+  enabled: true
+}
+```
 
-🔄 Exécution de l'achat...
-⏳ Transaction envoyée: 0xabc...123
-✅ Achat confirmé!
-📊 Résumé:
-   - Achat #1
-   - Prix d'achat: 45000.50 USDC/WBTC
-   - Balance WBTC totale: 0.07222
-   - Achats restants: 9
+### Changer le pourcentage de déclenchement
+
+Via l'interface web : **Paramètres** → **% de baisse pour achat**
+
+Ou dans le code (`server.js`), ligne ~15 :
+```javascript
+DROP_PERCENTAGE: 2,  // 2% de baisse
 ```
 
 ## 🔒 Sécurité
 
-- ✅ Limite de dépense (MAX_PURCHASES)
-- ✅ Slippage protection
-- ✅ Clé privée stockée localement uniquement
-- ⚠️ Ne laissez pas votre `.env` sur GitHub!
-- ⚠️ Testez d'abord avec de petits montants
+### ✅ Bonnes pratiques
 
-## ⚠️ Avertissements
+- Ne partagez JAMAIS votre `.env` ou clé privée
+- Ajoutez `.env` dans votre `.gitignore`
+- Utilisez un wallet dédié au trading (pas votre wallet principal)
+- Testez d'abord avec de petits montants
+- Gardez toujours de l'ETH pour les frais de gas
 
-- Ce bot achète automatiquement, assurez-vous d'avoir assez d'USDC
-- Les frais de gas sont à votre charge (~0.50-2$ par transaction)
-- Le prix peut varier entre la lecture et l'exécution (slippage)
-- **Risque de marché**: si le BTC baisse beaucoup, tous vos achats seront déclenchés rapidement
+### ⚠️ Limites de sécurité
+
+Le bot inclut plusieurs protections :
+- **Limite d'achats** par paire (MAX_PURCHASES)
+- **Slippage protection** (1% par défaut)
+- **Arrêt automatique** quand toutes les limites sont atteintes
+
+## 💰 Coûts
+
+### Frais de gas
+- **~0.50-2$ par transaction** sur Arbitrum
+- Dépend de la congestion du réseau
+
+### Exemple de coût total
+Si vous faites 10 achats sur 6 paires (60 transactions) :
+- Frais estimés : 30-120$ en gas
 
 ## 🐛 Résolution de problèmes
 
-**"PRIVATE_KEY manquante"**
-→ Créez un fichier `.env` avec votre clé privée
+### Le bot ne démarre pas
+
+**"Configuration RPC_URL ou PRIVATE_KEY manquante"**
+→ Vérifiez votre fichier `.env`
 
 **"Insufficient funds"**
-→ Assurez-vous d'avoir assez d'USDC + ETH pour le gas
+→ Ajoutez de l'ETH et de l'USDC sur votre wallet
+
+### L'interface ne se charge pas
+
+**Page blanche**
+→ Vérifiez que `index.html` est bien dans le dossier `public/`
+
+**"Failed to connect to server"**
+→ Vérifiez que le serveur tourne sur le port 3000
+
+### Erreurs de prix
+
+**"Erreur prix"**
+→ Vérifiez votre connexion RPC (Alchemy)
+→ Le pool Uniswap pour ce token existe-t-il ?
+
+### Erreurs de transaction
 
 **"Slippage tolerance exceeded"**
-→ Augmentez `SLIPPAGE_TOLERANCE` dans le code (ligne 16)
+→ Augmentez le slippage dans les paramètres (1% → 2%)
 
-**Prix ne se met pas à jour**
-→ Vérifiez votre connexion RPC (Alchemy/Infura)
+**"Transaction underpriced"**
+→ Le réseau est congestionné, attendez quelques minutes
 
-## 💡 Conseils
+## 📚 API Endpoints
 
-1. **Testez d'abord** avec `PURCHASE_AMOUNT=10` pour vous familiariser
-2. **Surveillez les frais** de gas sur [Arbiscan](https://arbiscan.io)
-3. **Gardez une réserve** d'ETH pour les frais
-4. **Notez vos achats** pour suivre votre DCA
+Le serveur expose plusieurs endpoints :
 
-## 📚 Ressources
+- `GET /api/config` - Récupérer la configuration
+- `POST /api/config` - Mettre à jour la configuration
+- `POST /api/start` - Démarrer le bot
+- `POST /api/stop` - Arrêter le bot
+- `GET /api/status` - Statut du bot
+- `GET /api/pairs` - État des paires
+
+### WebSocket Events
+
+- `connect` - Connexion établie
+- `log` - Nouveau log
+- `status` - Mise à jour du statut
+- `pairs-update` - Mise à jour des paires
+
+## 🔄 Mise à jour
+
+Pour mettre à jour les dépendances :
+
+```bash
+npm update
+```
+
+## 📝 Logs
+
+Les logs sont affichés :
+1. Dans l'interface web (section Journal d'activité)
+2. Dans le terminal du serveur
+
+Pour sauvegarder les logs dans un fichier, utilisez :
+
+```bash
+npm start > logs.txt 2>&1
+```
+
+## ⚡ Mode développement
+
+Pour un rechargement automatique lors des modifications :
+
+```bash
+npm run dev
+```
+
+(Nécessite `nodemon` installé)
+
+## 🎯 Stratégies recommandées
+
+### Stratégie Conservative
+- Montants faibles (100-300$)
+- Beaucoup d'achats (15-20)
+- Bon pour l'accumulation régulière
+
+### Stratégie Agressive
+- Montants élevés (1000-2000$)
+- Peu d'achats (5-10)
+- Capitalise sur les grosses baisses
+
+### Stratégie Équilibrée
+- Montants moyens (500$)
+- Nombre moyen d'achats (10-15)
+- Compromis entre les deux
+
+## 📖 Ressources
 
 - [Documentation Uniswap V3](https://docs.uniswap.org)
-- [Arbiscan Explorer](https://arbiscan.io)
-- [Prix WBTC en temps réel](https://www.coingecko.com/en/coins/wrapped-bitcoin)
+- [Arbiscan - Explorateur](https://arbiscan.io)
+- [Alchemy - RPC Provider](https://alchemy.com)
+- [Prix en temps réel - CoinGecko](https://www.coingecko.com)
+
+## ⚠️ Avertissement
+
+Ce bot est fourni à titre éducatif. Le trading comporte des risques :
+- Vous pouvez perdre votre capital
+- Les prix peuvent chuter fortement
+- Les frais de gas s'accumulent
+- Pas de garantie de profit
+
+**Tradez de manière responsable et ne risquez que ce que vous pouvez vous permettre de perdre.**
+
+## 📄 Licence
+
+MIT
 
 ---
 
-**⚡ Fait avec ❤️ pour DCA sur Arbitrum**
+**💡 Besoin d'aide ?** Vérifiez que :
+1. Node.js est bien installé (`node --version`)
+2. Le fichier `.env` est correct
+3. Vous avez de l'ETH et de l'USDC sur Arbitrum
+4. Votre RPC Alchemy fonctionne
+
+**🚀 Bon trading !**
