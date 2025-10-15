@@ -1,435 +1,462 @@
-import React, { useState, useEffect } from 'react';
-import { Play, Pause, Settings, TrendingDown, DollarSign, ShoppingCart, AlertCircle, RefreshCw } from 'lucide-react';
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const { ethers } = require('ethers');
+const cors = require('cors');
+require('dotenv').config();
 
-const DCABotManager = () => {
-  const [isRunning, setIsRunning] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [globalSettings, setGlobalSettings] = useState({
-    dropPercentage: 2,
-    checkInterval: 60,
-    slippageTolerance: 1,
-    rpcUrl: '',
-    privateKey: ''
-  });
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
 
-  const [pairs, setPairs] = useState([
-    {
-      id: 1,
-      name: 'WBTC',
-      address: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f',
-      decimals: 8,
-      purchaseAmount: '1000',
-      maxPurchases: 10,
-      fee: 3000,
-      enabled: true,
-      currentPrice: null,
-      lastPurchasePrice: null,
-      purchaseCount: 0,
-      balance: '0',
-      priceChange: 0
-    },
-    {
-      id: 2,
-      name: 'WETH',
-      address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
-      decimals: 18,
-      purchaseAmount: '500',
-      maxPurchases: 15,
-      fee: 500,
-      enabled: true,
-      currentPrice: null,
-      lastPurchasePrice: null,
-      purchaseCount: 0,
-      balance: '0',
-      priceChange: 0
-    },
-    {
-      id: 3,
-      name: 'LINK',
-      address: '0xf97f4df75117a78c1A5a0DBb814Af92458539FB4',
-      decimals: 18,
-      purchaseAmount: '300',
-      maxPurchases: 20,
-      fee: 3000,
-      enabled: true,
-      currentPrice: null,
-      lastPurchasePrice: null,
-      purchaseCount: 0,
-      balance: '0',
-      priceChange: 0
-    },
-    {
-      id: 4,
-      name: 'AVAX',
-      address: '0x565609fAF65B92F7be02468acF86f8979423e514',
-      decimals: 18,
-      purchaseAmount: '400',
-      maxPurchases: 12,
-      fee: 3000,
-      enabled: true,
-      currentPrice: null,
-      lastPurchasePrice: null,
-      purchaseCount: 0,
-      balance: '0',
-      priceChange: 0
-    },
-    {
-      id: 5,
-      name: 'SOL',
-      address: '0xb74Da9FE2F96B9E0a5f4A3cf0b92dd2bEC617124',
-      decimals: 9,
-      purchaseAmount: '600',
-      maxPurchases: 10,
-      fee: 10000,
-      enabled: true,
-      currentPrice: null,
-      lastPurchasePrice: null,
-      purchaseCount: 0,
-      balance: '0',
-      priceChange: 0
-    },
-    {
-      id: 6,
-      name: 'LDO',
-      address: '0x13Ad51ed4F1B7e9Dc168d8a00cB3f4dDD85EfA60',
-      decimals: 18,
-      purchaseAmount: '250',
-      maxPurchases: 15,
-      fee: 3000,
-      enabled: true,
-      currentPrice: null,
-      lastPurchasePrice: null,
-      purchaseCount: 0,
-      balance: '0',
-      priceChange: 0
+app.use(cors());
+app.use(express.json());
+app.use(express.static('public'));
+
+// ==================== CONFIGURATION ====================
+let CONFIG = {
+  RPC_URL: process.env.ARBITRUM_RPC_URL || '',
+  PRIVATE_KEY: process.env.PRIVATE_KEY || '',
+  DROP_PERCENTAGE: 2,
+  CHECK_INTERVAL: 60000,
+  SLIPPAGE_TOLERANCE: 1,
+  
+  UNISWAP_ROUTER: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
+  QUOTER: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+  USDC: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+};
+
+let PAIRS = [
+  {
+    id: 1,
+    name: 'WBTC',
+    address: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f',
+    decimals: 8,
+    purchaseAmount: '1000',
+    maxPurchases: 10,
+    fee: 3000,
+    enabled: true
+  },
+  {
+    id: 2,
+    name: 'WETH',
+    address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+    decimals: 18,
+    purchaseAmount: '500',
+    maxPurchases: 15,
+    fee: 500,
+    enabled: true
+  },
+  {
+    id: 3,
+    name: 'LINK',
+    address: '0xf97f4df75117a78c1A5a0DBb814Af92458539FB4',
+    decimals: 18,
+    purchaseAmount: '300',
+    maxPurchases: 20,
+    fee: 3000,
+    enabled: true
+  },
+  {
+    id: 4,
+    name: 'AVAX',
+    address: '0x565609fAF65B92F7be02468acF86f8979423e514',
+    decimals: 18,
+    purchaseAmount: '400',
+    maxPurchases: 12,
+    fee: 3000,
+    enabled: true
+  },
+  {
+    id: 5,
+    name: 'SOL',
+    address: '0xb74Da9FE2F96B9E0a5f4A3cf0b92dd2bEC617124',
+    decimals: 9,
+    purchaseAmount: '600',
+    maxPurchases: 10,
+    fee: 10000,
+    enabled: true
+  },
+  {
+    id: 6,
+    name: 'LDO',
+    address: '0x13Ad51ed4F1B7e9Dc168d8a00cB3f4dDD85EfA60',
+    decimals: 18,
+    purchaseAmount: '250',
+    maxPurchases: 15,
+    fee: 3000,
+    enabled: true
+  }
+];
+
+// ABIs
+const ERC20_ABI = [
+  'function approve(address spender, uint256 amount) external returns (bool)',
+  'function allowance(address owner, address spender) external view returns (uint256)',
+  'function balanceOf(address account) external view returns (uint256)',
+  'function decimals() external view returns (uint8)',
+  'function symbol() external view returns (string)'
+];
+
+const QUOTER_ABI = [
+  'function quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96)) external returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)'
+];
+
+const ROUTER_ABI = [
+  'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)'
+];
+
+// ==================== PAIR TRACKER ====================
+class PairTracker {
+  constructor(config, contracts, emitLog) {
+    this.config = config;
+    this.contracts = contracts;
+    this.emitLog = emitLog;
+    this.lastPurchasePrice = null;
+    this.purchaseCount = 0;
+    this.currentPrice = null;
+    this.balance = '0';
+  }
+
+  async getCurrentPrice() {
+    try {
+      const amountIn = ethers.parseUnits(this.config.purchaseAmount, 6);
+      
+      const params = {
+        tokenIn: CONFIG.USDC,
+        tokenOut: this.config.address,
+        amountIn: amountIn,
+        fee: this.config.fee,
+        sqrtPriceLimitX96: 0
+      };
+      
+      const quote = await this.contracts.quoter.quoteExactInputSingle.staticCall(params);
+      const tokenOut = quote[0];
+      
+      const pricePerToken = parseFloat(this.config.purchaseAmount) / 
+                           parseFloat(ethers.formatUnits(tokenOut, this.config.decimals));
+      
+      this.currentPrice = pricePerToken;
+      return pricePerToken;
+    } catch (error) {
+      this.emitLog('error', `[${this.config.name}] Erreur prix: ${error.message}`);
+      return null;
     }
-  ]);
+  }
 
-  const [logs, setLogs] = useState([
-    { time: new Date().toLocaleTimeString(), type: 'info', message: 'Bot prêt à démarrer' }
-  ]);
+  async getBalance() {
+    try {
+      const tokenContract = new ethers.Contract(this.config.address, ERC20_ABI, this.contracts.wallet);
+      const balance = await tokenContract.balanceOf(this.contracts.wallet.address);
+      this.balance = ethers.formatUnits(balance, this.config.decimals);
+      return this.balance;
+    } catch (error) {
+      return '0';
+    }
+  }
 
-  const addLog = (type, message) => {
-    const newLog = {
+  async executePurchase() {
+    try {
+      this.emitLog('info', `[${this.config.name}] 🔄 Exécution de l'achat...`);
+      
+      const amountIn = ethers.parseUnits(this.config.purchaseAmount, 6);
+      
+      const allowance = await this.contracts.usdc.allowance(
+        this.contracts.wallet.address, 
+        CONFIG.UNISWAP_ROUTER
+      );
+      
+      if (allowance < amountIn) {
+        this.emitLog('info', `[${this.config.name}] 📝 Approbation USDC...`);
+        const approveTx = await this.contracts.usdc.approve(CONFIG.UNISWAP_ROUTER, ethers.MaxUint256);
+        await approveTx.wait();
+        this.emitLog('success', `[${this.config.name}] ✅ Approbation confirmée`);
+      }
+      
+      const quote = await this.contracts.quoter.quoteExactInputSingle.staticCall({
+        tokenIn: CONFIG.USDC,
+        tokenOut: this.config.address,
+        amountIn: amountIn,
+        fee: this.config.fee,
+        sqrtPriceLimitX96: 0
+      });
+      
+      const amountOutMin = (quote[0] * BigInt(100 - CONFIG.SLIPPAGE_TOLERANCE)) / BigInt(100);
+      
+      const swapParams = {
+        tokenIn: CONFIG.USDC,
+        tokenOut: this.config.address,
+        fee: this.config.fee,
+        recipient: this.contracts.wallet.address,
+        amountIn: amountIn,
+        amountOutMinimum: amountOutMin,
+        sqrtPriceLimitX96: 0
+      };
+      
+      const tx = await this.contracts.router.exactInputSingle(swapParams);
+      this.emitLog('info', `[${this.config.name}] ⏳ TX: ${tx.hash}`);
+      
+      await tx.wait();
+      this.emitLog('success', `[${this.config.name}] ✅ Achat confirmé!`);
+      
+      this.purchaseCount++;
+      this.lastPurchasePrice = await this.getCurrentPrice();
+      await this.getBalance();
+      
+      this.emitLog('success', 
+        `[${this.config.name}] 📊 Achat #${this.purchaseCount} - Prix: ${this.lastPurchasePrice.toFixed(4)} USDC - Balance: ${this.balance}`
+      );
+      
+      return true;
+    } catch (error) {
+      this.emitLog('error', `[${this.config.name}] ❌ Erreur achat: ${error.message}`);
+      return false;
+    }
+  }
+
+  shouldPurchase() {
+    return this.purchaseCount < this.config.maxPurchases;
+  }
+
+  async checkAndExecute() {
+    if (!this.shouldPurchase()) {
+      return;
+    }
+    
+    const currentPrice = await this.getCurrentPrice();
+    if (!currentPrice) return;
+    
+    if (this.lastPurchasePrice === null) {
+      this.emitLog('info', `[${this.config.name}] 🎯 Premier achat déclenché`);
+      await this.executePurchase();
+      return;
+    }
+    
+    const priceChange = ((currentPrice - this.lastPurchasePrice) / this.lastPurchasePrice) * 100;
+    
+    if (priceChange <= -CONFIG.DROP_PERCENTAGE) {
+      this.emitLog('success', `[${this.config.name}] 🎯 Déclenchement! Baisse de ${Math.abs(priceChange).toFixed(2)}%`);
+      await this.executePurchase();
+    }
+  }
+
+  getState() {
+    return {
+      id: this.config.id,
+      name: this.config.name,
+      currentPrice: this.currentPrice,
+      lastPurchasePrice: this.lastPurchasePrice,
+      purchaseCount: this.purchaseCount,
+      balance: this.balance,
+      priceChange: this.lastPurchasePrice && this.currentPrice 
+        ? ((this.currentPrice - this.lastPurchasePrice) / this.lastPurchasePrice) * 100 
+        : 0
+    };
+  }
+}
+
+// ==================== BOT MANAGER ====================
+class BotManager {
+  constructor() {
+    this.isRunning = false;
+    this.provider = null;
+    this.wallet = null;
+    this.contracts = null;
+    this.pairs = [];
+    this.intervalId = null;
+  }
+
+  emitLog(type, message) {
+    const log = {
       time: new Date().toLocaleTimeString(),
       type,
       message
     };
-    setLogs(prev => [newLog, ...prev].slice(0, 50));
-  };
+    io.emit('log', log);
+  }
 
-  const updatePair = (id, updates) => {
-    setPairs(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
-  };
+  async init() {
+    try {
+      if (!CONFIG.RPC_URL || !CONFIG.PRIVATE_KEY) {
+        throw new Error('Configuration RPC_URL ou PRIVATE_KEY manquante');
+      }
 
-  const togglePair = (id) => {
-    setPairs(prev => prev.map(p => 
-      p.id === id ? { ...p, enabled: !p.enabled } : p
-    ));
-  };
-
-  const startBot = () => {
-    if (!globalSettings.rpcUrl || !globalSettings.privateKey) {
-      addLog('error', '❌ Configuration manquante! Vérifiez RPC URL et clé privée.');
-      setShowSettings(true);
-      return;
-    }
-    setIsRunning(true);
-    addLog('success', '▶️ Bot démarré!');
-  };
-
-  const stopBot = () => {
-    setIsRunning(false);
-    addLog('info', '⏸️ Bot arrêté');
-  };
-
-  const simulatePriceUpdate = () => {
-    setPairs(prev => prev.map(p => {
-      const mockPrice = Math.random() * 1000 + 100;
-      const lastPrice = p.lastPurchasePrice || mockPrice;
-      const change = ((mockPrice - lastPrice) / lastPrice) * 100;
-      return {
-        ...p,
-        currentPrice: mockPrice,
-        priceChange: change
+      this.provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
+      this.wallet = new ethers.Wallet(CONFIG.PRIVATE_KEY, this.provider);
+      
+      this.contracts = {
+        wallet: this.wallet,
+        usdc: new ethers.Contract(CONFIG.USDC, ERC20_ABI, this.wallet),
+        quoter: new ethers.Contract(CONFIG.QUOTER, QUOTER_ABI, this.provider),
+        router: new ethers.Contract(CONFIG.UNISWAP_ROUTER, ROUTER_ABI, this.wallet)
       };
-    }));
-  };
 
-  useEffect(() => {
-    if (isRunning) {
-      const interval = setInterval(() => {
-        simulatePriceUpdate();
-        addLog('info', '🔄 Vérification des prix...');
-      }, globalSettings.checkInterval * 1000);
-      return () => clearInterval(interval);
+      this.emitLog('success', `✅ Connexion établie: ${this.wallet.address.slice(0, 6)}...${this.wallet.address.slice(-4)}`);
+      
+      const usdcBalance = await this.contracts.usdc.balanceOf(this.wallet.address);
+      const usdcFormatted = ethers.formatUnits(usdcBalance, 6);
+      this.emitLog('info', `💰 Balance USDC: ${usdcFormatted}`);
+
+      this.pairs = [];
+      for (const pairConfig of PAIRS) {
+        if (!pairConfig.enabled) continue;
+        const tracker = new PairTracker(pairConfig, this.contracts, this.emitLog.bind(this));
+        await tracker.getBalance();
+        this.pairs.push(tracker);
+      }
+
+      this.emitLog('success', `🚀 Bot initialisé avec ${this.pairs.length} paires actives`);
+      return true;
+    } catch (error) {
+      this.emitLog('error', `❌ Erreur d'initialisation: ${error.message}`);
+      return false;
     }
-  }, [isRunning, globalSettings.checkInterval]);
+  }
 
-  const totalBudget = pairs.reduce((sum, p) => 
-    p.enabled ? sum + (parseFloat(p.purchaseAmount) * p.maxPurchases) : sum, 0
-  );
+  async start() {
+    if (this.isRunning) {
+      this.emitLog('error', '⚠️ Le bot est déjà en cours d\'exécution');
+      return false;
+    }
 
-  const totalPurchases = pairs.reduce((sum, p) => sum + p.purchaseCount, 0);
+    const initialized = await this.init();
+    if (!initialized) return false;
 
-  const exportConfig = () => {
-    const config = {
-      globalSettings,
-      pairs: pairs.map(({ currentPrice, lastPurchasePrice, purchaseCount, balance, priceChange, ...rest }) => rest)
+    this.isRunning = true;
+    this.emitLog('success', '▶️ Bot démarré!');
+    
+    this.intervalId = setInterval(async () => {
+      await this.checkAllPairs();
+    }, CONFIG.CHECK_INTERVAL);
+    
+    await this.checkAllPairs();
+    return true;
+  }
+
+  async checkAllPairs() {
+    this.emitLog('info', '🔄 Vérification des prix...');
+    
+    for (const pair of this.pairs) {
+      await pair.checkAndExecute();
+    }
+
+    io.emit('pairs-update', this.getPairsState());
+
+    const allComplete = this.pairs.every(p => !p.shouldPurchase());
+    if (allComplete) {
+      this.emitLog('info', '⛔ Toutes les paires ont atteint leur limite');
+      this.stop();
+    }
+  }
+
+  stop() {
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+    this.isRunning = false;
+    this.emitLog('info', '⏸️ Bot arrêté');
+  }
+
+  getPairsState() {
+    return this.pairs.map(p => p.getState());
+  }
+
+  getStatus() {
+    return {
+      isRunning: this.isRunning,
+      walletAddress: this.wallet ? this.wallet.address : null,
+      activePairs: this.pairs.length
     };
-    const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'dca-bot-config.json';
-    a.click();
-  };
+  }
+}
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-4xl font-bold mb-2">🤖 DCA Bot Manager</h1>
-            <p className="text-gray-400">Gestion multi-paires sur Arbitrum</p>
-          </div>
-          <div className="flex gap-4">
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className="px-6 py-3 bg-slate-700 hover:bg-slate-600 rounded-lg flex items-center gap-2 transition"
-            >
-              <Settings size={20} />
-              Paramètres
-            </button>
-            {!isRunning ? (
-              <button
-                onClick={startBot}
-                className="px-6 py-3 bg-green-600 hover:bg-green-500 rounded-lg flex items-center gap-2 transition font-semibold"
-              >
-                <Play size={20} />
-                Démarrer
-              </button>
-            ) : (
-              <button
-                onClick={stopBot}
-                className="px-6 py-3 bg-red-600 hover:bg-red-500 rounded-lg flex items-center gap-2 transition font-semibold"
-              >
-                <Pause size={20} />
-                Arrêter
-              </button>
-            )}
-          </div>
-        </div>
+const botManager = new BotManager();
 
-        {/* Settings Panel */}
-        {showSettings && (
-          <div className="bg-slate-800 rounded-lg p-6 mb-6 border border-slate-700">
-            <h2 className="text-2xl font-bold mb-4">⚙️ Configuration Globale</h2>
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-sm text-gray-400 mb-2">RPC URL Arbitrum</label>
-                <input
-                  type="text"
-                  value={globalSettings.rpcUrl}
-                  onChange={(e) => setGlobalSettings({...globalSettings, rpcUrl: e.target.value})}
-                  placeholder="https://arb-mainnet.g.alchemy.com/v2/..."
-                  className="w-full px-4 py-2 bg-slate-700 rounded border border-slate-600 focus:border-purple-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-2">Clé Privée</label>
-                <input
-                  type="password"
-                  value={globalSettings.privateKey}
-                  onChange={(e) => setGlobalSettings({...globalSettings, privateKey: e.target.value})}
-                  placeholder="0x..."
-                  className="w-full px-4 py-2 bg-slate-700 rounded border border-slate-600 focus:border-purple-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-2">% de baisse pour achat</label>
-                <input
-                  type="number"
-                  value={globalSettings.dropPercentage}
-                  onChange={(e) => setGlobalSettings({...globalSettings, dropPercentage: parseFloat(e.target.value)})}
-                  className="w-full px-4 py-2 bg-slate-700 rounded border border-slate-600 focus:border-purple-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-2">Intervalle (secondes)</label>
-                <input
-                  type="number"
-                  value={globalSettings.checkInterval}
-                  onChange={(e) => setGlobalSettings({...globalSettings, checkInterval: parseInt(e.target.value)})}
-                  className="w-full px-4 py-2 bg-slate-700 rounded border border-slate-600 focus:border-purple-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-2">Slippage toléré (%)</label>
-                <input
-                  type="number"
-                  value={globalSettings.slippageTolerance}
-                  onChange={(e) => setGlobalSettings({...globalSettings, slippageTolerance: parseFloat(e.target.value)})}
-                  className="w-full px-4 py-2 bg-slate-700 rounded border border-slate-600 focus:border-purple-500 outline-none"
-                />
-              </div>
-              <div className="flex items-end">
-                <button
-                  onClick={exportConfig}
-                  className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded transition"
-                >
-                  📥 Exporter la config
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+// ==================== API ROUTES ====================
 
-        {/* Stats Overview */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
-            <div className="text-gray-400 text-sm mb-1">Budget Total Max</div>
-            <div className="text-2xl font-bold">${totalBudget.toLocaleString()}</div>
-          </div>
-          <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
-            <div className="text-gray-400 text-sm mb-1">Paires Actives</div>
-            <div className="text-2xl font-bold">{pairs.filter(p => p.enabled).length}/{pairs.length}</div>
-          </div>
-          <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
-            <div className="text-gray-400 text-sm mb-1">Achats Effectués</div>
-            <div className="text-2xl font-bold">{totalPurchases}</div>
-          </div>
-          <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
-            <div className="text-gray-400 text-sm mb-1">Statut</div>
-            <div className="text-2xl font-bold flex items-center gap-2">
-              {isRunning ? (
-                <><div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div> Actif</>
-              ) : (
-                <><div className="w-3 h-3 bg-gray-500 rounded-full"></div> Arrêté</>
-              )}
-            </div>
-          </div>
-        </div>
+// Get current configuration
+app.get('/api/config', (req, res) => {
+  res.json({
+    globalSettings: {
+      dropPercentage: CONFIG.DROP_PERCENTAGE,
+      checkInterval: CONFIG.CHECK_INTERVAL / 1000,
+      slippageTolerance: CONFIG.SLIPPAGE_TOLERANCE,
+      rpcUrl: CONFIG.RPC_URL ? '***configured***' : '',
+      privateKey: CONFIG.PRIVATE_KEY ? '***configured***' : ''
+    },
+    pairs: PAIRS
+  });
+});
 
-        {/* Pairs Grid */}
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          {pairs.map(pair => (
-            <div
-              key={pair.id}
-              className={`bg-slate-800 rounded-lg p-6 border-2 transition ${
-                pair.enabled ? 'border-purple-500' : 'border-slate-700 opacity-50'
-              }`}
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <h3 className="text-2xl font-bold mb-1">{pair.name}</h3>
-                  <div className="text-sm text-gray-400">Balance: {parseFloat(pair.balance).toFixed(4)}</div>
-                </div>
-                <button
-                  onClick={() => togglePair(pair.id)}
-                  className={`px-4 py-2 rounded transition ${
-                    pair.enabled 
-                      ? 'bg-green-600 hover:bg-green-500' 
-                      : 'bg-slate-600 hover:bg-slate-500'
-                  }`}
-                >
-                  {pair.enabled ? 'ON' : 'OFF'}
-                </button>
-              </div>
+// Update configuration
+app.post('/api/config', (req, res) => {
+  const { globalSettings, pairs } = req.body;
+  
+  if (botManager.isRunning) {
+    return res.status(400).json({ error: 'Cannot update config while bot is running' });
+  }
 
-              {pair.currentPrice && (
-                <div className="mb-4 p-3 bg-slate-700 rounded">
-                  <div className="text-sm text-gray-400">Prix actuel</div>
-                  <div className="text-xl font-bold">${pair.currentPrice.toFixed(2)}</div>
-                  {pair.lastPurchasePrice && (
-                    <div className={`text-sm mt-1 ${pair.priceChange < 0 ? 'text-red-400' : 'text-green-400'}`}>
-                      {pair.priceChange > 0 ? '+' : ''}{pair.priceChange.toFixed(2)}% depuis dernier achat
-                    </div>
-                  )}
-                </div>
-              )}
+  if (globalSettings) {
+    if (globalSettings.dropPercentage) CONFIG.DROP_PERCENTAGE = globalSettings.dropPercentage;
+    if (globalSettings.checkInterval) CONFIG.CHECK_INTERVAL = globalSettings.checkInterval * 1000;
+    if (globalSettings.slippageTolerance) CONFIG.SLIPPAGE_TOLERANCE = globalSettings.slippageTolerance;
+    if (globalSettings.rpcUrl) CONFIG.RPC_URL = globalSettings.rpcUrl;
+    if (globalSettings.privateKey) CONFIG.PRIVATE_KEY = globalSettings.privateKey;
+  }
 
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Montant (USDC)</label>
-                  <input
-                    type="number"
-                    value={pair.purchaseAmount}
-                    onChange={(e) => updatePair(pair.id, { purchaseAmount: e.target.value })}
-                    disabled={isRunning}
-                    className="w-full px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none disabled:opacity-50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Max Achats</label>
-                  <input
-                    type="number"
-                    value={pair.maxPurchases}
-                    onChange={(e) => updatePair(pair.id, { maxPurchases: parseInt(e.target.value) })}
-                    disabled={isRunning}
-                    className="w-full px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none disabled:opacity-50"
-                  />
-                </div>
-              </div>
+  if (pairs) {
+    PAIRS = pairs.map((p, index) => ({
+      ...PAIRS[index],
+      ...p
+    }));
+  }
 
-              <div className="flex items-center justify-between text-sm">
-                <div className="text-gray-400">
-                  Achats: {pair.purchaseCount}/{pair.maxPurchases}
-                </div>
-                <div className="text-gray-400">
-                  Budget: ${(parseFloat(pair.purchaseAmount) * pair.maxPurchases).toLocaleString()}
-                </div>
-              </div>
+  res.json({ success: true });
+});
 
-              <div className="mt-3 bg-slate-700 rounded-full h-2">
-                <div
-                  className="bg-purple-500 h-2 rounded-full transition-all"
-                  style={{ width: `${(pair.purchaseCount / pair.maxPurchases) * 100}%` }}
-                ></div>
-              </div>
-            </div>
-          ))}
-        </div>
+// Start bot
+app.post('/api/start', async (req, res) => {
+  const success = await botManager.start();
+  res.json({ success });
+});
 
-        {/* Logs */}
-        <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold">📋 Journal d'activité</h2>
-            <button
-              onClick={() => setLogs([])}
-              className="text-sm text-gray-400 hover:text-white transition"
-            >
-              Effacer
-            </button>
-          </div>
-          <div className="space-y-2 max-h-64 overflow-y-auto">
-            {logs.map((log, i) => (
-              <div
-                key={i}
-                className={`p-3 rounded text-sm ${
-                  log.type === 'error' ? 'bg-red-900/30 text-red-300' :
-                  log.type === 'success' ? 'bg-green-900/30 text-green-300' :
-                  'bg-slate-700 text-gray-300'
-                }`}
-              >
-                <span className="text-gray-500 mr-2">[{log.time}]</span>
-                {log.message}
-              </div>
-            ))}
-          </div>
-        </div>
+// Stop bot
+app.post('/api/stop', (req, res) => {
+  botManager.stop();
+  res.json({ success: true });
+});
 
-        {/* Warning */}
-        <div className="mt-6 bg-yellow-900/30 border border-yellow-700 rounded-lg p-4 flex items-start gap-3">
-          <AlertCircle className="text-yellow-500 flex-shrink-0 mt-1" size={20} />
-          <div className="text-sm text-yellow-200">
-            <strong>Attention:</strong> Cette interface est un prototype. Pour l'utiliser en production, vous devrez connecter le backend Node.js avec des WebSockets ou une API REST pour communiquer avec le bot réel.
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
+// Get status
+app.get('/api/status', (req, res) => {
+  res.json(botManager.getStatus());
+});
 
-export default DCABotManager;
+// Get pairs state
+app.get('/api/pairs', (req, res) => {
+  res.json(botManager.getPairsState());
+});
+
+// ==================== WEBSOCKET ====================
+io.on('connection', (socket) => {
+  console.log('Client connecté');
+  
+  socket.emit('status', botManager.getStatus());
+  socket.emit('pairs-update', botManager.getPairsState());
+
+  socket.on('disconnect', () => {
+    console.log('Client déconnecté');
+  });
+});
+
+// ==================== START SERVER ====================
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+  console.log(`📡 WebSocket disponible sur ws://localhost:${PORT}`);
+});
