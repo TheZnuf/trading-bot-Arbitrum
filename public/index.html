@@ -269,6 +269,21 @@
                                    ${isRunning ? 'disabled' : ''}
                                    class="w-full px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none">
                         </div>
+                        <div class="col-span-2">
+                            <label class="block text-xs text-gray-400 mb-1">% Baisse déclenchement</label>
+                            <div class="flex items-center gap-2">
+                                <input type="number" 
+                                       value="${pair.dropPercentage || 2}" 
+                                       step="0.1"
+                                       min="0.1"
+                                       max="20"
+                                       onchange="updatePairConfig(${pair.id}, 'dropPercentage', parseFloat(this.value))"
+                                       ${isRunning ? 'disabled' : ''}
+                                       class="flex-1 px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none">
+                                <span class="text-sm text-gray-400">%</span>
+                            </div>
+                            <div class="text-xs text-gray-500 mt-1">Achète quand le prix baisse de ce %</div>
+                        </div>
                     </div>
 
                     <div class="flex items-center justify-between text-sm mb-3">
@@ -292,8 +307,15 @@
         function updatePairConfig(id, field, value) {
             const pair = pairs.find(p => p.id === id);
             if (pair) {
-                pair[field] = field === 'purchaseAmount' ? value : parseInt(value);
+                if (field === 'purchaseAmount') {
+                    pair[field] = value;
+                } else if (field === 'dropPercentage') {
+                    pair[field] = parseFloat(value);
+                } else {
+                    pair[field] = parseInt(value);
+                }
                 updateStats();
+                autoSave();
             }
         }
 
