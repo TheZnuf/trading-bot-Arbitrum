@@ -227,14 +227,30 @@
                     </div>
 
                     ${pair.currentPrice ? `
-                        <div class="mb-4 p-3 bg-slate-700 rounded">
-                            <div class="text-sm text-gray-400">Prix actuel</div>
-                            <div class="text-xl font-bold">$${pair.currentPrice.toFixed(2)}</div>
+                        <div class="mb-4">
+                            <div class="p-3 bg-slate-700 rounded mb-2">
+                                <div class="text-sm text-gray-400">Prix actuel</div>
+                                <div class="text-xl font-bold">${pair.currentPrice.toFixed(2)}</div>
+                            </div>
                             ${pair.lastPurchasePrice ? `
-                                <div class="text-sm mt-1 ${pair.priceChange < 0 ? 'text-red-400' : 'text-green-400'}">
-                                    ${pair.priceChange > 0 ? '+' : ''}${pair.priceChange.toFixed(2)}% depuis dernier achat
+                                <div class="p-3 rounded ${pair.priceChange <= -2 ? 'bg-green-900/30 border border-green-600' : pair.priceChange < 0 ? 'bg-yellow-900/30 border border-yellow-600' : 'bg-slate-700 border border-slate-600'}">
+                                    <div class="flex items-center justify-between">
+                                        <div class="text-sm text-gray-300">
+                                            ${pair.priceChange <= -2 ? '🎯 Prêt à acheter!' : 'Variation'}
+                                        </div>
+                                        <div class="text-lg font-bold ${pair.priceChange < 0 ? 'text-red-400' : 'text-green-400'}">
+                                            ${pair.priceChange > 0 ? '+' : ''}${pair.priceChange.toFixed(2)}%
+                                        </div>
+                                    </div>
+                                    <div class="text-xs text-gray-400 mt-1">
+                                        Depuis dernier achat: ${pair.lastPurchasePrice.toFixed(2)}
+                                    </div>
                                 </div>
-                            ` : ''}
+                            ` : `
+                                <div class="p-3 bg-blue-900/30 border border-blue-600 rounded">
+                                    <div class="text-sm text-blue-300">⏳ En attente du premier achat</div>
+                                </div>
+                            `}
                         </div>
                     ` : ''}
 
