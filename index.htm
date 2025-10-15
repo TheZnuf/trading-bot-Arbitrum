@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DCA Bot Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body class="bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white min-h-screen">
+    <div class="max-w-7xl mx-auto p-6">
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-8">
+            <div>
+                <h1 class="text-4xl font-bold mb-2">🤖 DCA Bot Manager</h1>
+                <p class="text-gray-400">Gestion multi-paires sur Arbitrum</p>
+            </div>
+            <div class="flex gap-4">
+                <button onclick="toggleSettings()" class="px-6 py-3 bg-slate-700 hover:bg-slate-600 rounded-lg transition">
+                    ⚙️ Paramètres
+                </button>
+                <button id="startStopBtn" onclick="toggleBot()" class="px-6 py-3 bg-green-600 hover:bg-green-500 rounded-lg font-semibold transition">
+                    ▶️ Démarrer
+                </button>
+            </div>
+        </div>
+
+        <!-- Settings Panel -->
+        <div id="settingsPanel" class="bg-slate-800 rounded-lg p-6 mb-6 border border-slate-700 hidden">
+            <h2 class="text-2xl font-bold mb-4">⚙️ Configuration Globale</h2>
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2">RPC URL Arbitrum</label>
+                    <input type="text" id="rpcUrl" placeholder="https://arb-mainnet.g.alchemy.com/v2/..." 
+                           class="w-full px-4 py-2 bg-slate-700 rounded border border-slate-600 focus:border-purple-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2">Clé Privée</label>
+                    <input type="password" id="privateKey" placeholder="0x..." 
+                           class="w-full px-4 py-2 bg-slate-700 rounded border border-slate-600 focus:border-purple-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2">% de baisse pour achat</label>
+                    <input type="number" id="dropPercentage" value="2" 
+                           class="w-full px-4 py-2 bg-slate-700 rounded border border-slate-600 focus:border-purple-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2">Intervalle (secondes)</label>
+                    <input type="number" id="checkInterval" value="60" 
+                           class="w-full px-4 py-2 bg-slate-700 rounded border border-slate-600 focus:border-purple-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2">Slippage toléré (%)</label>
+                    <input type="number" id="slippageTolerance" value="1" 
+                           class="w-full px-4 py-2 bg-slate-700 rounded border border-slate-600 focus:border-purple-500 outline-none">
+                </div>
+                <div class="flex items-end">
+                    <button onclick="saveConfig()" class="w-full px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded transition">
+                        💾 Sauvegarder
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="grid grid-cols-4 gap-4 mb-6">
+            <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+                <div class="text-gray-400 text-sm mb-1">Budget Total Max</div>
+                <div class="text-2xl font-bold" id="totalBudget">$0</div>
+            </div>
+            <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+                <div class="text-gray-400 text-sm mb-1">Paires Actives</div>
+                <div class="text-2xl font-bold" id="activePairs">0/0</div>
+            </div>
+            <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+                <div class="text-gray-400 text-sm mb-1">Achats Effectués</div>
+                <div class="text-2xl font-bold" id="totalPurchases">0</div>
+            </div>
+            <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+                <div class="text-gray-400 text-sm mb-1">Statut</div>
+                <div class="text-2xl font-bold flex items-center gap-2" id="status">
+                    <div class="w-3 h-3 bg-gray-500 rounded-full"></div> Arrêté
+                </div>
+            </div>
+        </div>
+
+        <!-- Pairs Grid -->
+        <div id="pairsGrid" class="grid grid-cols-2 gap-4 mb-6">
+            <!-- Dynamically loaded -->
+        </div>
+
+        <!-- Logs -->
+        <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl font-bold">📋 Journal d'activité</h2>
+                <button onclick="clearLogs()" class="text-sm text-gray-400 hover:text-white transition">
+                    Effacer
+                </button>
+            </div>
+            <div id="logs" class="space-y-2 max-h-64 overflow-y-auto">
+                <div class="p-3 rounded text-sm bg-slate-700 text-gray-300">
+                    <span class="text-gray-500 mr-2">[--:--:--]</span>
+                    En attente de connexion...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:3000';
+        const socket = io(API_URL);
+        
+        let isRunning = false;
+        let pairs = [];
+        let config = {};
+
+        // WebSocket listeners
+        socket.on('connect', () => {
+            addLog('success', '✅ Connecté au serveur');
+            loadConfig();
+        });
+
+        socket.on('disconnect', () => {
+            addLog('error', '❌ Déconnecté du serveur');
+        });
+
+        socket.on('log', (log) => {
+            addLog(log.type, log.message);
+        });
+
+        socket.on('status', (status) => {
+            updateStatus(status);
+        });
+
+        socket.on('pairs-update', (pairsData) => {
+            updatePairs(pairsData);
+        });
+
+        // Load configuration
+        async function loadConfig() {
+            try {
+                const res = await fetch(`${API_URL}/api/config`);
+                const data = await res.json();
+                config = data;
+                pairs = data.pairs;
+                
+                document.getElementById('dropPercentage').value = data.globalSettings.dropPercentage;
+                document.getElementById('checkInterval').value = data.globalSettings.checkInterval;
+                document.getElementById('slippageTolerance').value = data.globalSettings.slippageTolerance;
+                
+                renderPairs();
+                updateStats();
+            } catch (error) {
+                addLog('error', `Erreur de chargement: ${error.message}`);
+            }
+        }
+
+        // Save configuration
+        async function saveConfig() {
+            const globalSettings = {
+                dropPercentage: parseFloat(document.getElementById('dropPercentage').value),
+                checkInterval: parseInt(document.getElementById('checkInterval').value),
+                slippageTolerance: parseFloat(document.getElementById('slippageTolerance').value),
+                rpcUrl: document.getElementById('rpcUrl').value,
+                privateKey: document.getElementById('privateKey').value
+            };
+
+            try {
+                const res = await fetch(`${API_URL}/api/config`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ globalSettings, pairs })
+                });
+                
+                if (res.ok) {
+                    addLog('success', '✅ Configuration sauvegardée');
+                }
+            } catch (error) {
+                addLog('error', `Erreur de sauvegarde: ${error.message}`);
+            }
+        }
+
+        // Toggle bot
+        async function toggleBot() {
+            const endpoint = isRunning ? 'stop' : 'start';
+            
+            try {
+                const res = await fetch(`${API_URL}/api/${endpoint}`, { method: 'POST' });
+                const data = await res.json();
+                
+                if (data.success) {
+                    isRunning = !isRunning;
+                    updateStartStopButton();
+                }
+            } catch (error) {
+                addLog('error', `Erreur: ${error.message}`);
+            }
+        }
+
+        // Update pairs
+        function updatePairs(pairsData) {
+            pairsData.forEach(pairData => {
+                const pair = pairs.find(p => p.id === pairData.id);
+                if (pair) {
+                    Object.assign(pair, pairData);
+                }
+            });
+            renderPairs();
+            updateStats();
+        }
+
+        // Render pairs
+        function renderPairs() {
+            const grid = document.getElementById('pairsGrid');
+            grid.innerHTML = pairs.map(pair => `
+                <div class="bg-slate-800 rounded-lg p-6 border-2 ${pair.enabled ? 'border-purple-500' : 'border-slate-700 opacity-50'}">
+                    <div class="flex items-start justify-between mb-4">
+                        <div>
+                            <h3 class="text-2xl font-bold mb-1">${pair.name}</h3>
+                            <div class="text-sm text-gray-400">Balance: ${parseFloat(pair.balance || 0).toFixed(4)}</div>
+                        </div>
+                        <button onclick="togglePair(${pair.id})" 
+                                class="px-4 py-2 rounded transition ${pair.enabled ? 'bg-green-600 hover:bg-green-500' : 'bg-slate-600 hover:bg-slate-500'}"
+                                ${isRunning ? 'disabled' : ''}>
+                            ${pair.enabled ? 'ON' : 'OFF'}
+                        </button>
+                    </div>
+
+                    ${pair.currentPrice ? `
+                        <div class="mb-4 p-3 bg-slate-700 rounded">
+                            <div class="text-sm text-gray-400">Prix actuel</div>
+                            <div class="text-xl font-bold">$${pair.currentPrice.toFixed(2)}</div>
+                            ${pair.lastPurchasePrice ? `
+                                <div class="text-sm mt-1 ${pair.priceChange < 0 ? 'text-red-400' : 'text-green-400'}">
+                                    ${pair.priceChange > 0 ? '+' : ''}${pair.priceChange.toFixed(2)}% depuis dernier achat
+                                </div>
+                            ` : ''}
+                        </div>
+                    ` : ''}
+
+                    <div class="grid grid-cols-2 gap-3 mb-4">
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">Montant (USDC)</label>
+                            <input type="number" value="${pair.purchaseAmount}" 
+                                   onchange="updatePairConfig(${pair.id}, 'purchaseAmount', this.value)"
+                                   ${isRunning ? 'disabled' : ''}
+                                   class="w-full px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">Max Achats</label>
+                            <input type="number" value="${pair.maxPurchases}" 
+                                   onchange="updatePairConfig(${pair.id}, 'maxPurchases', this.value)"
+                                   ${isRunning ? 'disabled' : ''}
+                                   class="w-full px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none">
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between text-sm mb-3">
+                        <div class="text-gray-400">
+                            Achats: ${pair.purchaseCount || 0}/${pair.maxPurchases}
+                        </div>
+                        <div class="text-gray-400">
+                            Budget: ${(parseFloat(pair.purchaseAmount) * pair.maxPurchases).toLocaleString()}
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-700 rounded-full h-2">
+                        <div class="bg-purple-500 h-2 rounded-full transition-all" 
+                             style="width: ${((pair.purchaseCount || 0) / pair.maxPurchases) * 100}%"></div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Update pair config
+        function updatePairConfig(id, field, value) {
+            const pair = pairs.find(p => p.id === id);
+            if (pair) {
+                pair[field] = field === 'purchaseAmount' ? value : parseInt(value);
+                updateStats();
+            }
+        }
+
+        // Toggle pair
+        function togglePair(id) {
+            if (isRunning) return;
+            const pair = pairs.find(p => p.id === id);
+            if (pair) {
+                pair.enabled = !pair.enabled;
+                renderPairs();
+                updateStats();
+            }
+        }
+
+        // Update stats
+        function updateStats() {
+            const totalBudget = pairs.reduce((sum, p) => 
+                p.enabled ? sum + (parseFloat(p.purchaseAmount) * p.maxPurchases) : sum, 0
+            );
+            const activePairs = pairs.filter(p => p.enabled).length;
+            const totalPurchases = pairs.reduce((sum, p) => sum + (p.purchaseCount || 0), 0);
+
+            document.getElementById('totalBudget').textContent = `${totalBudget.toLocaleString()}`;
+            document.getElementById('activePairs').textContent = `${activePairs}/${pairs.length}`;
+            document.getElementById('totalPurchases').textContent = totalPurchases;
+        }
+
+        // Update status
+        function updateStatus(status) {
+            isRunning = status.isRunning;
+            updateStartStopButton();
+            
+            const statusDiv = document.getElementById('status');
+            if (isRunning) {
+                statusDiv.innerHTML = '<div class="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div> Actif';
+            } else {
+                statusDiv.innerHTML = '<div class="w-3 h-3 bg-gray-500 rounded-full"></div> Arrêté';
+            }
+        }
+
+        // Update start/stop button
+        function updateStartStopButton() {
+            const btn = document.getElementById('startStopBtn');
+            if (isRunning) {
+                btn.className = 'px-6 py-3 bg-red-600 hover:bg-red-500 rounded-lg font-semibold transition';
+                btn.innerHTML = '⏸️ Arrêter';
+            } else {
+                btn.className = 'px-6 py-3 bg-green-600 hover:bg-green-500 rounded-lg font-semibold transition';
+                btn.innerHTML = '▶️ Démarrer';
+            }
+        }
+
+        // Add log
+        function addLog(type, message) {
+            const logsDiv = document.getElementById('logs');
+            const time = new Date().toLocaleTimeString();
+            
+            const logClass = type === 'error' ? 'bg-red-900/30 text-red-300' :
+                           type === 'success' ? 'bg-green-900/30 text-green-300' :
+                           'bg-slate-700 text-gray-300';
+            
+            const logHTML = `
+                <div class="p-3 rounded text-sm ${logClass}">
+                    <span class="text-gray-500 mr-2">[${time}]</span>
+                    ${message}
+                </div>
+            `;
+            
+            logsDiv.insertAdjacentHTML('afterbegin', logHTML);
+            
+            // Keep only last 50 logs
+            const logs = logsDiv.children;
+            while (logs.length > 50) {
+                logsDiv.removeChild(logs[logs.length - 1]);
+            }
+        }
+
+        // Clear logs
+        function clearLogs() {
+            document.getElementById('logs').innerHTML = '';
+        }
+
+        // Toggle settings
+        function toggleSettings() {
+            const panel = document.getElementById('settingsPanel');
+            panel.classList.toggle('hidden');
+        }
+
+        // Auto-save pairs config on change
+        let saveTimeout;
+        function autoSave() {
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => {
+                saveConfig();
+            }, 1000);
+        }
+
+        // Initialize
+        window.addEventListener('load', () => {
+            addLog('info', '🚀 Interface chargée');
+        });
+    </script>
+</body>
+</html>
