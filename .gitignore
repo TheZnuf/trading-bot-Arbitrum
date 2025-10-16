@@ -7,6 +7,9 @@ package-lock.json
 .env.local
 .env.production
 
+# Bot state (contient l'historique des achats)
+bot-state.json
+
 # Logs
 logs/
 *.log
