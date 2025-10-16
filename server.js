@@ -3,6 +3,8 @@ const http = require('http');
 const { Server } = require('socket.io');
 const { ethers } = require('ethers');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
@@ -17,6 +19,43 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
+
+// Fichier de sauvegarde de l'état
+const STATE_FILE = path.join(__dirname, 'bot-state.json');
+
+// ==================== STATE MANAGEMENT ====================
+function saveState(pairs) {
+  try {
+    const state = {
+      timestamp: new Date().toISOString(),
+      pairs: pairs.map(p => ({
+        id: p.config.id,
+        name: p.config.name,
+        lastPurchasePrice: p.lastPurchasePrice,
+        ath: p.ath,
+        purchaseCount: p.purchaseCount
+      }))
+    };
+    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+    console.log('💾 État sauvegardé');
+  } catch (error) {
+    console.error('❌ Erreur sauvegarde état:', error.message);
+  }
+}
+
+function loadState() {
+  try {
+    if (fs.existsSync(STATE_FILE)) {
+      const data = fs.readFileSync(STATE_FILE, 'utf8');
+      const state = JSON.parse(data);
+      console.log('📂 État chargé depuis:', state.timestamp);
+      return state.pairs;
+    }
+  } catch (error) {
+    console.error('❌ Erreur chargement état:', error.message);
+  }
+  return null;
+}
 
 // ==================== CONFIGURATION ====================
 let CONFIG = {
@@ -37,7 +76,7 @@ let PAIRS = [
     name: 'WBTC',
     address: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f',
     decimals: 8,
-    purchaseAmount: '1000',
+    purchaseAmount: process.env.AMOUNT_1 || 50,
     maxPurchases: 10,
     dropPercentage: 2,
     fee: 3000,
@@ -48,7 +87,7 @@ let PAIRS = [
     name: 'WETH',
     address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
     decimals: 18,
-    purchaseAmount: '500',
+    purchaseAmount: process.env.AMOUNT_1 || 50,
     maxPurchases: 15,
     dropPercentage: 2,
     fee: 500,
@@ -59,7 +98,7 @@ let PAIRS = [
     name: 'LINK',
     address: '0xf97f4df75117a78c1A5a0DBb814Af92458539FB4',
     decimals: 18,
-    purchaseAmount: '300',
+    purchaseAmount: process.env.AMOUNT_2 || 10,
     maxPurchases: 20,
     dropPercentage: 2,
     fee: 3000,
@@ -70,7 +109,7 @@ let PAIRS = [
     name: 'AVAX',
     address: '0x565609fAF65B92F7be02468acF86f8979423e514',
     decimals: 18,
-    purchaseAmount: '400',
+    purchaseAmount: process.env.AMOUNT_2 || 10,
     maxPurchases: 12,
     dropPercentage: 2,
     fee: 3000,
@@ -81,7 +120,7 @@ let PAIRS = [
     name: 'SOL',
     address: '0xb74Da9FE2F96B9E0a5f4A3cf0b92dd2bEC617124',
     decimals: 9,
-    purchaseAmount: '600',
+    purchaseAmount: process.env.AMOUNT_2|| 10,
     maxPurchases: 10,
     dropPercentage: 2,
     fee: 10000,
@@ -92,7 +131,7 @@ let PAIRS = [
     name: 'LDO',
     address: '0x13Ad51ed4F1B7e9Dc168d8a00cB3f4dDD85EfA60',
     decimals: 18,
-    purchaseAmount: '250',
+    purchaseAmount: process.env.AMOUNT_2 || 10,
     maxPurchases: 15,
     dropPercentage: 2,
     fee: 3000,
@@ -130,6 +169,16 @@ class PairTracker {
     this.balance = '0';
   }
 
+  // Restaurer l'état depuis la sauvegarde
+  restoreState(savedState) {
+    if (savedState) {
+      this.lastPurchasePrice = savedState.lastPurchasePrice;
+      this.ath = savedState.ath;
+      this.purchaseCount = savedState.purchaseCount;
+      this.emitLog('success', `[${this.config.name}] 📂 État restauré: ${this.purchaseCount} achats, ATH: ${this.ath ? this.ath.toFixed(2) : 'N/A'}`);
+    }
+  }
+
   async getCurrentPrice() {
     try {
       const amountIn = ethers.parseUnits(this.config.purchaseAmount, 6);
@@ -149,6 +198,13 @@ class PairTracker {
                            parseFloat(ethers.formatUnits(tokenOut, this.config.decimals));
       
       this.currentPrice = pricePerToken;
+      
+      // Mettre à jour l'ATH si le prix actuel est plus élevé
+      if (this.ath !== null && pricePerToken > this.ath) {
+        this.ath = pricePerToken;
+        this.emitLog('info', `[${this.config.name}] 🔥 Nouveau ATH: ${this.ath.toFixed(4)} USDC`);
+      }
+      
       return pricePerToken;
     } catch (error) {
       this.emitLog('error', `[${this.config.name}] Erreur prix: ${error.message}`);
@@ -213,11 +269,17 @@ class PairTracker {
       
       this.purchaseCount++;
       this.lastPurchasePrice = await this.getCurrentPrice();
+      this.ath = this.lastPurchasePrice; // Réinitialiser l'ATH au prix d'achat
       await this.getBalance();
       
       this.emitLog('success', 
         `[${this.config.name}] 📊 Achat #${this.purchaseCount} - Prix: ${this.lastPurchasePrice.toFixed(4)} USDC - Balance: ${this.balance}`
       );
+      
+      // Sauvegarder l'état après chaque achat
+      if (this.saveStateCallback) {
+        this.saveStateCallback();
+      }
       
       return true;
     } catch (error) {
@@ -231,6 +293,11 @@ class PairTracker {
   }
 
   async checkAndExecute() {
+    // Ne rien faire si la paire n'est pas activée
+    if (!this.config.enabled) {
+      return;
+    }
+    
     if (!this.shouldPurchase()) {
       return;
     }
@@ -238,19 +305,24 @@ class PairTracker {
     const currentPrice = await this.getCurrentPrice();
     if (!currentPrice) return;
     
+    // Premier achat
     if (this.lastPurchasePrice === null) {
       this.emitLog('info', `[${this.config.name}] 🎯 Premier achat déclenché`);
       await this.executePurchase();
       return;
     }
     
-    const priceChange = ((currentPrice - this.lastPurchasePrice) / this.lastPurchasePrice) * 100;
+    // L'ATH a déjà été mis à jour dans getCurrentPrice() si nécessaire
     
-    // Utiliser le dropPercentage de la paire
+    // Calculer la baisse depuis l'ATH
+    const dropFromATH = this.ath ? ((currentPrice - this.ath) / this.ath) * 100 : 0;
     const dropThreshold = this.config.dropPercentage || CONFIG.DROP_PERCENTAGE;
     
-    if (priceChange <= -dropThreshold) {
-      this.emitLog('success', `[${this.config.name}] 🎯 Déclenchement! Baisse de ${Math.abs(priceChange).toFixed(2)}%`);
+    // Vérifier si baisse >= seuil depuis l'ATH
+    if (dropFromATH <= -dropThreshold) {
+      this.emitLog('success', 
+        `[${this.config.name}] 🎯 Déclenchement! Prix actuel: ${currentPrice.toFixed(4)}, ATH: ${this.ath.toFixed(4)}, Baisse: ${Math.abs(dropFromATH).toFixed(2)}%`
+      );
       await this.executePurchase();
     }
   }
@@ -261,11 +333,12 @@ class PairTracker {
       name: this.config.name,
       currentPrice: this.currentPrice,
       lastPurchasePrice: this.lastPurchasePrice,
+      ath: this.ath,
       purchaseCount: this.purchaseCount,
       balance: this.balance,
       dropPercentage: this.config.dropPercentage,
-      priceChange: this.lastPurchasePrice && this.currentPrice 
-        ? ((this.currentPrice - this.lastPurchasePrice) / this.lastPurchasePrice) * 100 
+      priceChange: this.ath && this.currentPrice 
+        ? ((this.currentPrice - this.ath) / this.ath) * 100 
         : 0
     };
   }
@@ -313,10 +386,30 @@ class BotManager {
       const usdcFormatted = ethers.formatUnits(usdcBalance, 6);
       this.emitLog('info', `💰 Balance USDC: ${usdcFormatted}`);
 
+      // Charger l'état sauvegardé
+      const savedStates = loadState();
+
       this.pairs = [];
       for (const pairConfig of PAIRS) {
-        if (!pairConfig.enabled) continue;
+        // Ne créer des trackers que pour les paires activées
+        if (!pairConfig.enabled) {
+          this.emitLog('info', `⏸️ [${pairConfig.name}] Paire désactivée, ignorée`);
+          continue;
+        }
+        
         const tracker = new PairTracker(pairConfig, this.contracts, this.emitLog.bind(this));
+        
+        // Ajouter le callback de sauvegarde
+        tracker.saveStateCallback = () => saveState(this.pairs);
+        
+        // Restaurer l'état si disponible
+        if (savedStates) {
+          const savedState = savedStates.find(s => s.id === pairConfig.id);
+          if (savedState) {
+            tracker.restoreState(savedState);
+          }
+        }
+        
         await tracker.getBalance();
         this.pairs.push(tracker);
       }
@@ -424,8 +517,10 @@ app.post('/api/config', (req, res) => {
   if (pairs) {
     PAIRS = pairs.map((p, index) => ({
       ...PAIRS[index],
-      ...p
+      ...p,
+      enabled: p.enabled // S'assurer que enabled est bien synchronisé
     }));
+    console.log('✅ Configuration des paires mise à jour');
   }
 
   res.json({ success: true });
@@ -433,13 +528,17 @@ app.post('/api/config', (req, res) => {
 
 // Start bot
 app.post('/api/start', async (req, res) => {
+  console.log('📥 Requête de démarrage reçue');
   const success = await botManager.start();
+  console.log(`📤 Réponse: ${success ? 'succès' : 'échec'}`);
   res.json({ success });
 });
 
 // Stop bot
 app.post('/api/stop', (req, res) => {
+  console.log('📥 Requête d\'arrêt reçue');
   botManager.stop();
+  console.log('📤 Bot arrêté');
   res.json({ success: true });
 });
 
@@ -455,13 +554,13 @@ app.get('/api/pairs', (req, res) => {
 
 // ==================== WEBSOCKET ====================
 io.on('connection', (socket) => {
-  console.log('Client connecté');
+  console.log('✅ Client connecté:', socket.id);
   
   socket.emit('status', botManager.getStatus());
   socket.emit('pairs-update', botManager.getPairsState());
 
   socket.on('disconnect', () => {
-    console.log('Client déconnecté');
+    console.log('❌ Client déconnecté:', socket.id);
   });
 });
 
@@ -470,4 +569,6 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
   console.log(`📡 WebSocket disponible sur ws://localhost:${PORT}`);
+  console.log(`\n💡 Ouvrez http://localhost:${PORT} dans votre navigateur`);
+  console.log(`📋 Vérifiez votre fichier .env pour la configuration\n`);
 });
