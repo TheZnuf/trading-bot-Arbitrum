@@ -75,7 +75,10 @@
     </div>
 
     <script>
-        const API_URL = 'http://localhost:3000';
+        // Détection automatique de l'URL du serveur
+        const API_URL = window.location.origin;
+        console.log('🌐 API URL:', API_URL);
+        
         const socket = io(API_URL, {
             transports: ['websocket', 'polling']
         });
@@ -190,6 +193,8 @@
                     pair.balance = pairData.balance;
                     pair.priceChange = pairData.priceChange;
                     pair.dropPercentage = pairData.dropPercentage;
+                    pair.averagePrice = pairData.averagePrice;
+                    pair.totalSpent = pairData.totalSpent;
                     console.log(`Paire ${pair.name} mise à jour:`, pair);
                 }
             });
@@ -397,7 +402,27 @@
 
         // Initialize
         window.addEventListener('load', () => {
+            console.log('🚀 Page chargée');
+            console.log('API_URL:', API_URL);
+            console.log('Socket.io version:', io.version);
             addLog('info', '🚀 Interface chargée');
+        });
+
+        // Test de connexion au chargement
+        window.addEventListener('DOMContentLoaded', () => {
+            console.log('📄 DOM chargé');
+            
+            // Test API
+            fetch(`${API_URL}/api/status`)
+                .then(res => res.json())
+                .then(data => {
+                    console.log('✅ API répond:', data);
+                    addLog('success', '✅ API accessible');
+                })
+                .catch(err => {
+                    console.error('❌ Erreur API:', err);
+                    addLog('error', '❌ Impossible de joindre le serveur');
+                });
         });
     </script>
 </body>
