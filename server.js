@@ -339,6 +339,13 @@ class PairTracker {
       
       const amountIn = ethers.parseUnits(this.config.purchaseAmount, 6);
       
+      // Vérifier la balance USDC avant d'acheter
+      const usdcBalance = await this.contracts.usdc.balanceOf(this.contracts.wallet.address);
+      if (usdcBalance < amountIn) {
+        const usdcFormatted = ethers.formatUnits(usdcBalance, 6);
+        throw new Error(`Balance USDC insuffisante: ${usdcFormatted} USDC disponible, ${this.config.purchaseAmount} USDC requis`);
+      }
+      
       const allowance = await this.contracts.usdc.allowance(
         this.contracts.wallet.address, 
         CONFIG.UNISWAP_ROUTER
@@ -400,7 +407,18 @@ class PairTracker {
       
       return true;
     } catch (error) {
-      this.emitLog('error', `[${this.config.name}] ❌ Erreur achat: ${error.message}`);
+      // Messages d'erreur plus clairs
+      let errorMessage = error.message;
+      
+      if (error.message.includes('STF') || error.message.includes('SafeTransferFrom')) {
+        errorMessage = 'Balance USDC insuffisante pour cet achat';
+      } else if (error.message.includes('Too little received')) {
+        errorMessage = 'Slippage trop élevé, augmentez SLIPPAGE_TOLERANCE';
+      } else if (error.message.includes('Pool not found')) {
+        errorMessage = 'Pool Uniswap non trouvé pour cette paire';
+      }
+      
+      this.emitLog('error', `[${this.config.name}] ❌ Erreur achat: ${errorMessage}`);
       return false;
     }
   }
@@ -562,6 +580,22 @@ class BotManager {
   }
 
   async checkAllPairs() {
+    // Vérifier la balance USDC globale
+    try {
+      const usdcBalance = await this.contracts.usdc.balanceOf(this.wallet.address);
+      const usdcFormatted = ethers.formatUnits(usdcBalance, 6);
+      
+      // Calculer le besoin minimum (une transaction par paire activée)
+      const enabledPairs = this.pairs.filter(p => p.config.enabled);
+      const minRequired = enabledPairs.reduce((sum, p) => sum + parseFloat(p.config.purchaseAmount), 0);
+      
+      if (parseFloat(usdcFormatted) < minRequired) {
+        this.emitLog('error', `⚠️ Balance USDC faible: ${usdcFormatted} USDC (min recommandé: ${minRequired} USDC)`);
+      }
+    } catch (error) {
+      console.error('Erreur vérification USDC:', error);
+    }
+    
     this.emitLog('info', '🔄 Vérification des prix...');
     
     for (const pair of this.pairs) {
