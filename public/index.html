@@ -386,6 +386,47 @@
             }
         }
 
+        // Sell tokens
+        async function sellTokens(pairId) {
+            const percentage = parseInt(document.getElementById(`sell-range-${pairId}`).value);
+            const pair = pairs.find(p => p.id === pairId);
+            
+            if (!pair) {
+                addLog('error', 'Paire non trouvée');
+                return;
+            }
+
+            if (!confirm(`Vendre ${percentage}% de ${pair.name} (${(parseFloat(pair.balance) * percentage / 100).toFixed(4)} ${pair.name}) ?`)) {
+                return;
+            }
+
+            addLog('info', `⏳ Vente de ${percentage}% de ${pair.name}...`);
+
+            try {
+                const res = await fetch(`${API_URL}/api/sell`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pairId, percentage })
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    addLog('success', `✅ Vente réussie: ${data.amountSold} ${pair.name} → ${data.usdcReceived} USDC`);
+                    // Forcer la mise à jour de la balance
+                    setTimeout(() => {
+                        fetch(`${API_URL}/api/pairs`)
+                            .then(r => r.json())
+                            .then(pairsData => updatePairs(pairsData));
+                    }, 2000);
+                } else {
+                    addLog('error', `❌ Erreur vente: ${data.error}`);
+                }
+            } catch (error) {
+                addLog('error', `❌ Erreur: ${error.message}`);
+            }
+        }
+
         // Clear logs
         function clearLogs() {
             document.getElementById('logs').innerHTML = '';
