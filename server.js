@@ -243,6 +243,96 @@ class PairTracker {
     }
   }
 
+  async executeSell(percentage) {
+    try {
+      if (percentage <= 0 || percentage > 100) {
+        throw new Error('Pourcentage invalide (doit être entre 1 et 100)');
+      }
+
+      this.emitLog('info', `[${this.config.name}] 💰 Préparation vente de ${percentage}%...`);
+      
+      // Récupérer la balance actuelle
+      const tokenContract = new ethers.Contract(this.config.address, ERC20_ABI, this.contracts.wallet);
+      const balance = await tokenContract.balanceOf(this.contracts.wallet.address);
+      
+      if (balance === 0n) {
+        throw new Error('Balance nulle, rien à vendre');
+      }
+
+      // Calculer le montant à vendre
+      const amountToSell = (balance * BigInt(percentage)) / 100n;
+      
+      this.emitLog('info', `[${this.config.name}] 📊 Vente de ${ethers.formatUnits(amountToSell, this.config.decimals)} ${this.config.name}`);
+
+      // Vérifier l'allowance pour le router
+      const allowance = await tokenContract.allowance(this.contracts.wallet.address, CONFIG.UNISWAP_ROUTER);
+      
+      if (allowance < amountToSell) {
+        this.emitLog('info', `[${this.config.name}] 📝 Approbation ${this.config.name}...`);
+        const approveTx = await tokenContract.approve(CONFIG.UNISWAP_ROUTER, ethers.MaxUint256);
+        await approveTx.wait();
+        this.emitLog('success', `[${this.config.name}] ✅ Approbation confirmée`);
+      }
+
+      // Obtenir le prix (combien d'USDC on va recevoir)
+      const quote = await this.contracts.quoter.quoteExactInputSingle.staticCall({
+        tokenIn: this.config.address,
+        tokenOut: CONFIG.USDC,
+        amountIn: amountToSell,
+        fee: this.config.fee,
+        sqrtPriceLimitX96: 0
+      });
+
+      const usdcOut = quote[0];
+      const minUsdcOut = (usdcOut * BigInt(100 - CONFIG.SLIPPAGE_TOLERANCE)) / BigInt(100);
+      
+      // Exécuter la vente
+      const swapParams = {
+        tokenIn: this.config.address,
+        tokenOut: CONFIG.USDC,
+        fee: this.config.fee,
+        recipient: this.contracts.wallet.address,
+        amountIn: amountToSell,
+        amountOutMinimum: minUsdcOut,
+        sqrtPriceLimitX96: 0
+      };
+
+      const tx = await this.contracts.router.exactInputSingle(swapParams);
+      this.emitLog('info', `[${this.config.name}] ⏳ TX vente: ${tx.hash}`);
+      
+      await tx.wait();
+      
+      const usdcReceived = ethers.formatUnits(usdcOut, 6);
+      const sellPrice = parseFloat(usdcReceived) / parseFloat(ethers.formatUnits(amountToSell, this.config.decimals));
+      
+      this.emitLog('success', `[${this.config.name}] ✅ Vente confirmée!`);
+      this.emitLog('success', 
+        `[${this.config.name}] 💵 Reçu: ${usdcReceived} USDC à ${sellPrice.toFixed(2)} USDC/${this.config.name}`
+      );
+
+      // Calculer le profit/perte si on a un prix moyen
+      if (this.averagePrice) {
+        const profitPercent = ((sellPrice - this.averagePrice) / this.averagePrice) * 100;
+        const profitEmoji = profitPercent > 0 ? '📈' : '📉';
+        this.emitLog('success', 
+          `[${this.config.name}] ${profitEmoji} P&L: ${profitPercent > 0 ? '+' : ''}${profitPercent.toFixed(2)}% (Prix moyen: ${this.averagePrice.toFixed(2)})`
+        );
+      }
+
+      await this.getBalance();
+      
+      return {
+        success: true,
+        usdcReceived,
+        sellPrice,
+        amountSold: ethers.formatUnits(amountToSell, this.config.decimals)
+      };
+    } catch (error) {
+      this.emitLog('error', `[${this.config.name}] ❌ Erreur vente: ${error.message}`);
+      return { success: false, error: error.message };
+    }
+  }
+
   async executePurchase() {
     try {
       this.emitLog('info', `[${this.config.name}] 🔄 Exécution de l'achat...`);
@@ -581,6 +671,23 @@ app.get('/api/pairs', (req, res) => {
   res.json(botManager.getPairsState());
 });
 
+// Sell tokens
+app.post('/api/sell', async (req, res) => {
+  const { pairId, percentage } = req.body;
+  
+  if (!pairId || !percentage) {
+    return res.status(400).json({ error: 'pairId et percentage requis' });
+  }
+
+  const pair = botManager.pairs.find(p => p.config.id === pairId);
+  if (!pair) {
+    return res.status(404).json({ error: 'Paire non trouvée' });
+  }
+
+  const result = await pair.executeSell(percentage);
+  res.json(result);
+});
+
 // ==================== WEBSOCKET ====================
 io.on('connection', (socket) => {
   console.log('✅ Client connecté:', socket.id);
@@ -595,10 +702,17 @@ io.on('connection', (socket) => {
 
 // ==================== START SERVER ====================
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
-  console.log(`📡 WebSocket disponible sur ws://localhost:${PORT}`);
-  console.log(`\n💡 Ouvrez http://localhost:${PORT} dans votre navigateur`);
+const HOST = process.env.HOST || '0.0.0.0'; // Écoute sur toutes les interfaces
+
+server.listen(PORT, HOST, () => {
+  console.log(`🚀 Serveur démarré sur http://${HOST}:${PORT}`);
+  
+  if (process.env.SERVER_URL) {
+    console.log(`🌐 URL publique: ${process.env.SERVER_URL}`);
+  }
+  
+  console.log(`📡 WebSocket disponible`);
+  console.log(`\n💡 Interface web: ${process.env.SERVER_URL || `http://localhost:${PORT}`}`);
   console.log(`📋 Vérifiez votre fichier .env pour la configuration`);
   console.log(`\n💰 Montants configurés:`);
   console.log(`   - AMOUNT_1 (BTC, ETH): ${CONFIG.AMOUNT_1} USDC`);
