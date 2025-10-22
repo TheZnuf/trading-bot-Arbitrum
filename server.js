@@ -11,12 +11,16 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+    origin: process.env.CORS_ORIGIN || "*",
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || "*",
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.static('public'));
 
@@ -33,7 +37,9 @@ function saveState(pairs) {
         name: p.config.name,
         lastPurchasePrice: p.lastPurchasePrice,
         ath: p.ath,
-        purchaseCount: p.purchaseCount
+        purchaseCount: p.purchaseCount,
+        totalSpent: p.totalSpent,
+        averagePrice: p.averagePrice
       }))
     };
     fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
@@ -65,6 +71,10 @@ let CONFIG = {
   CHECK_INTERVAL: 60000,
   SLIPPAGE_TOLERANCE: 1,
   
+  // Montants par catégorie depuis .env
+  AMOUNT_1: process.env.AMOUNT_1 || '1000', // BTC, ETH (large caps)
+  AMOUNT_2: process.env.AMOUNT_2 || '500',  // Autres tokens
+  
   UNISWAP_ROUTER: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
   QUOTER: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
   USDC: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
@@ -76,66 +86,72 @@ let PAIRS = [
     name: 'WBTC',
     address: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f',
     decimals: 8,
-    purchaseAmount: process.env.AMOUNT_1 || 50,
+    purchaseAmount: CONFIG.AMOUNT_1,
     maxPurchases: 10,
     dropPercentage: 2,
     fee: 3000,
-    enabled: true
+    enabled: true,
+    category: 1
   },
   {
     id: 2,
     name: 'WETH',
     address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
     decimals: 18,
-    purchaseAmount: process.env.AMOUNT_1 || 50,
+    purchaseAmount: CONFIG.AMOUNT_1,
     maxPurchases: 15,
     dropPercentage: 2,
     fee: 500,
-    enabled: true
+    enabled: true,
+    category: 1
   },
   {
     id: 3,
     name: 'LINK',
     address: '0xf97f4df75117a78c1A5a0DBb814Af92458539FB4',
     decimals: 18,
-    purchaseAmount: process.env.AMOUNT_2 || 10,
+    purchaseAmount: CONFIG.AMOUNT_2,
     maxPurchases: 20,
     dropPercentage: 2,
     fee: 3000,
-    enabled: true
+    enabled: true,
+    category: 2
   },
   {
     id: 4,
-    name: 'AVAX',
-    address: '0x565609fAF65B92F7be02468acF86f8979423e514',
+    name: 'AAVE',
+    address: '0xba5DdD1f9d7F570dc94a51479a000E3BCE967196',
     decimals: 18,
-    purchaseAmount: process.env.AMOUNT_2 || 10,
+    purchaseAmount: CONFIG.AMOUNT_2,
     maxPurchases: 12,
     dropPercentage: 2,
     fee: 3000,
-    enabled: true
+    enabled: true,
+    category: 2
   },
   {
     id: 5,
-    name: 'SOL',
-    address: '0xb74Da9FE2F96B9E0a5f4A3cf0b92dd2bEC617124',
-    decimals: 9,
-    purchaseAmount: process.env.AMOUNT_2|| 10,
+    name: 'UNI',
+    address: '0xFa7F8980b0f1E64A2062791cc3b0871572f1F7f0',
+    decimals: 18,
+    purchaseAmount: CONFIG.AMOUNT_2,
     maxPurchases: 10,
     dropPercentage: 2,
-    fee: 10000,
-    enabled: true
+    fee: 3000,
+    enabled: true,
+    category: 2
   },
   {
     id: 6,
     name: 'LDO',
     address: '0x13Ad51ed4F1B7e9Dc168d8a00cB3f4dDD85EfA60',
     decimals: 18,
-    purchaseAmount: process.env.AMOUNT_2 || 10,
+    purchaseAmount: CONFIG.AMOUNT_2,
     maxPurchases: 15,
     dropPercentage: 2,
     fee: 3000,
-    enabled: true
+    enabled: true,
+    category: 2
   }
 ];
 
@@ -167,6 +183,8 @@ class PairTracker {
     this.purchaseCount = 0;
     this.currentPrice = null;
     this.balance = '0';
+    this.totalSpent = 0; // Total dépensé en USDC
+    this.averagePrice = null; // Prix moyen d'achat
   }
 
   // Restaurer l'état depuis la sauvegarde
@@ -175,7 +193,9 @@ class PairTracker {
       this.lastPurchasePrice = savedState.lastPurchasePrice;
       this.ath = savedState.ath;
       this.purchaseCount = savedState.purchaseCount;
-      this.emitLog('success', `[${this.config.name}] 📂 État restauré: ${this.purchaseCount} achats, ATH: ${this.ath ? this.ath.toFixed(2) : 'N/A'}`);
+      this.totalSpent = savedState.totalSpent || 0;
+      this.averagePrice = savedState.averagePrice || null;
+      this.emitLog('success', `[${this.config.name}] 📂 État restauré: ${this.purchaseCount} achats, ATH: ${this.ath ? this.ath.toFixed(2) : 'N/A'}, Prix moyen: ${this.averagePrice ? this.averagePrice.toFixed(2) : 'N/A'}`);
     }
   }
 
@@ -272,8 +292,15 @@ class PairTracker {
       this.ath = this.lastPurchasePrice; // Réinitialiser l'ATH au prix d'achat
       await this.getBalance();
       
+      // Calculer le prix moyen
+      this.totalSpent += parseFloat(this.config.purchaseAmount);
+      const balanceNumber = parseFloat(this.balance);
+      if (balanceNumber > 0) {
+        this.averagePrice = this.totalSpent / balanceNumber;
+      }
+      
       this.emitLog('success', 
-        `[${this.config.name}] 📊 Achat #${this.purchaseCount} - Prix: ${this.lastPurchasePrice.toFixed(4)} USDC - Balance: ${this.balance}`
+        `[${this.config.name}] 📊 Achat #${this.purchaseCount} - Prix: ${this.lastPurchasePrice.toFixed(4)} USDC - Balance: ${this.balance} - Prix moyen: ${this.averagePrice ? this.averagePrice.toFixed(4) : 'N/A'} USDC`
       );
       
       // Sauvegarder l'état après chaque achat
@@ -337,6 +364,8 @@ class PairTracker {
       purchaseCount: this.purchaseCount,
       balance: this.balance,
       dropPercentage: this.config.dropPercentage,
+      averagePrice: this.averagePrice,
+      totalSpent: this.totalSpent,
       priceChange: this.ath && this.currentPrice 
         ? ((this.currentPrice - this.ath) / this.ath) * 100 
         : 0
@@ -570,5 +599,8 @@ server.listen(PORT, () => {
   console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
   console.log(`📡 WebSocket disponible sur ws://localhost:${PORT}`);
   console.log(`\n💡 Ouvrez http://localhost:${PORT} dans votre navigateur`);
-  console.log(`📋 Vérifiez votre fichier .env pour la configuration\n`);
+  console.log(`📋 Vérifiez votre fichier .env pour la configuration`);
+  console.log(`\n💰 Montants configurés:`);
+  console.log(`   - AMOUNT_1 (BTC, ETH): ${CONFIG.AMOUNT_1} USDC`);
+  console.log(`   - AMOUNT_2 (Autres): ${CONFIG.AMOUNT_2} USDC\n`);
 });
