@@ -702,6 +702,24 @@ app.get('/api/status', (req, res) => {
 
 // Get pairs state
 app.get('/api/pairs', (req, res) => {
+  // Si le bot n'est pas initialisé, retourner un état vide avec les IDs
+  if (botManager.pairs.length === 0) {
+    const emptyState = PAIRS.map(p => ({
+      id: p.id,
+      name: p.name,
+      currentPrice: null,
+      lastPurchasePrice: null,
+      ath: null,
+      purchaseCount: 0,
+      balance: '0',
+      dropPercentage: p.dropPercentage,
+      averagePrice: null,
+      totalSpent: 0,
+      priceChange: 0
+    }));
+    return res.json(emptyState);
+  }
+  
   res.json(botManager.getPairsState());
 });
 
