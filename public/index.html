@@ -216,7 +216,6 @@
                     pair.ath = pairData.ath;
                     pair.purchaseCount = pairData.purchaseCount;
                     pair.balance = pairData.balance;
-                    pair.priceChange = pairData.priceChange;
                     pair.dropPercentage = pairData.dropPercentage;
                     pair.averagePrice = pairData.averagePrice;
                     pair.totalSpent = pairData.totalSpent;
@@ -230,7 +229,14 @@
         // Render pairs
         function renderPairs() {
             const grid = document.getElementById('pairsGrid');
-            grid.innerHTML = pairs.map(pair => `
+            grid.innerHTML = pairs.map(pair => {
+                const pnl = pair.averagePrice && pair.currentPrice ? ((pair.currentPrice - pair.averagePrice) / pair.averagePrice) * 100 : 0;
+                const pnlColor = pnl >= 0 ? 'text-green-400' : 'text-red-400';
+                const athDrop = pair.ath && pair.currentPrice ? ((pair.currentPrice - pair.ath) / pair.ath) * 100 : 0;
+                const targetPrice = pair.lastPurchasePrice ? pair.lastPurchasePrice * (1 - (pair.dropPercentage / 100)) : pair.currentPrice * (1 - (pair.dropPercentage / 100));
+                const readyToBuy = pair.currentPrice <= targetPrice;
+
+                return `
                 <div class="bg-slate-800 rounded-lg p-6 border-2 ${pair.enabled ? 'border-purple-500' : 'border-slate-700 opacity-50'}">
                     <div class="flex items-start justify-between mb-4">
                         <div>
@@ -245,80 +251,99 @@
                     </div>
 
                     ${pair.currentPrice ? `
-                        <div class="mb-4">
-                            <div class="p-3 bg-slate-700 rounded mb-2">
-                                <div class="text-sm text-gray-400">Prix actuel</div>
-                                <div class="text-xl font-bold">${pair.currentPrice.toFixed(2)}</div>
+                        <div class="space-y-3">
+                            <!-- Ligne 1: Prix actuel | ATH -->
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="p-3 bg-slate-700 rounded">
+                                    <div class="text-sm text-gray-400">Prix actuel</div>
+                                    <div class="text-xl font-bold">${pair.currentPrice.toFixed(2)}</div>
+                                </div>
+                                <div class="p-3 bg-slate-700 rounded border border-orange-500">
+                                    <div class="text-sm text-orange-400">ATH 🔥</div>
+                                    <div class="text-xl font-bold text-orange-400">${(pair.ath || 0).toFixed(2)}</div>
+                                </div>
                             </div>
-                            ${pair.lastPurchasePrice ? `
-                                <div class="p-3 rounded ${pair.priceChange <= -2 ? 'bg-green-900/30 border border-green-600' : pair.priceChange < 0 ? 'bg-yellow-900/30 border border-yellow-600' : 'bg-slate-700 border border-slate-600'}">
-                                    <div class="flex items-center justify-between">
-                                        <div class="text-sm text-gray-300">
-                                            ${pair.priceChange <= -2 ? '🎯 Prêt à acheter!' : 'Variation'}
-                                        </div>
-                                        <div class="text-lg font-bold ${pair.priceChange < 0 ? 'text-red-400' : 'text-green-400'}">
-                                            ${pair.priceChange > 0 ? '+' : ''}${pair.priceChange.toFixed(2)}%
-                                        </div>
-                                    </div>
-                                    <div class="text-xs text-gray-400 mt-1">
-                                        Depuis dernier achat: ${pair.lastPurchasePrice.toFixed(2)}
-                                    </div>
-                                </div>
-                            ` : `
-                                <div class="p-3 bg-blue-900/30 border border-blue-600 rounded">
-                                    <div class="text-sm text-blue-300">⏳ En attente du premier achat</div>
-                                </div>
-                            `}
-                        </div>
-                    ` : ''}
 
-                    <div class="grid grid-cols-2 gap-3 mb-4">
-                        <div>
-                            <label class="block text-xs text-gray-400 mb-1">Montant (USDC)</label>
-                            <input type="number" value="${pair.purchaseAmount}" 
-                                   onchange="updatePairConfig(${pair.id}, 'purchaseAmount', this.value)"
-                                   ${isRunning ? 'disabled' : ''}
-                                   class="w-full px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none">
+                            <!-- Ligne 2: Prix moyen & P&L -->
+                            ${pair.averagePrice ? `
+                            <div class="p-3 rounded bg-slate-700 border border-blue-500">
+                                <div class="flex items-center justify-between">
+                                    <div class="text-sm text-blue-300">Prix moyen</div>
+                                    <div class="text-lg font-bold">${pair.averagePrice.toFixed(2)}</div>
+                                </div>
+                                <div class="flex items-center justify-between mt-1">
+                                    <div class="text-sm text-gray-400">P&L</div>
+                                    <div class="text-lg font-bold ${pnlColor}">${pnl.toFixed(2)}%</div>
+                                </div>
+                            </div>
+                            ` : ''}
+
+                            <!-- Ligne 3: Variation ATH + Objectif -->
+                            <div class="p-3 rounded ${readyToBuy ? 'bg-green-900/30 border border-green-600' : 'bg-slate-700'}">
+                                <div class="flex items-center justify-between">
+                                    <div class="text-sm ${readyToBuy ? 'text-green-300' : 'text-gray-300'}">
+                                        ${readyToBuy ? '🎯 Prêt à acheter!' : `Depuis ATH: <span class="font-bold text-red-400">${athDrop.toFixed(2)}%</span>`}
+                                    </div>
+                                    <div class="text-sm text-gray-400">
+                                        Objectif: <span class="font-bold">${targetPrice.toFixed(2)}</span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                        <div>
-                            <label class="block text-xs text-gray-400 mb-1">Max Achats</label>
-                            <input type="number" value="${pair.maxPurchases}" 
-                                   onchange="updatePairConfig(${pair.id}, 'maxPurchases', this.value)"
-                                   ${isRunning ? 'disabled' : ''}
-                                   class="w-full px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none">
+                    ` : `
+                        <div class="p-3 bg-blue-900/30 border border-blue-600 rounded">
+                            <div class="text-sm text-blue-300">⏳ En attente de données...</div>
                         </div>
-                        <div class="col-span-2">
-                            <label class="block text-xs text-gray-400 mb-1">% Baisse déclenchement</label>
-                            <div class="flex items-center gap-2">
-                                <input type="number" 
-                                       value="${pair.dropPercentage || 2}" 
-                                       step="0.1"
-                                       min="0.1"
-                                       max="20"
-                                       onchange="updatePairConfig(${pair.id}, 'dropPercentage', parseFloat(this.value))"
+                    `}
+
+                    <div class="mt-6">
+                        <div class="grid grid-cols-2 gap-3 mb-4">
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Montant (USDC)</label>
+                                <input type="number" value="${pair.purchaseAmount}" 
+                                       onchange="updatePairConfig(${pair.id}, 'purchaseAmount', this.value)"
                                        ${isRunning ? 'disabled' : ''}
-                                       class="flex-1 px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none">
-                                <span class="text-sm text-gray-400">%</span>
+                                       class="w-full px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none">
                             </div>
-                            <div class="text-xs text-gray-500 mt-1">Achète quand le prix baisse de ce %</div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Max Achats</label>
+                                <input type="number" value="${pair.maxPurchases}" 
+                                       onchange="updatePairConfig(${pair.id}, 'maxPurchases', this.value)"
+                                       ${isRunning ? 'disabled' : ''}
+                                       class="w-full px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none">
+                            </div>
+                            <div class="col-span-2">
+                                <label class="block text-xs text-gray-400 mb-1">% Baisse déclenchement</label>
+                                <div class="flex items-center gap-2">
+                                    <input type="number" 
+                                           value="${pair.dropPercentage || 2}" 
+                                           step="0.1"
+                                           min="0.1"
+                                           max="20"
+                                           onchange="updatePairConfig(${pair.id}, 'dropPercentage', parseFloat(this.value))"
+                                           ${isRunning ? 'disabled' : ''}
+                                           class="flex-1 px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none">
+                                    <span class="text-sm text-gray-400">%</span>
+                                </div>
+                            </div>
                         </div>
-                    </div>
 
-                    <div class="flex items-center justify-between text-sm mb-3">
-                        <div class="text-gray-400">
-                            Achats: ${pair.purchaseCount || 0}/${pair.maxPurchases}
+                        <div class="flex items-center justify-between text-sm mb-3">
+                            <div class="text-gray-400">
+                                Achats: ${pair.purchaseCount || 0}/${pair.maxPurchases}
+                            </div>
+                            <div class="text-gray-400">
+                                Budget: ${(parseFloat(pair.purchaseAmount) * pair.maxPurchases).toLocaleString()}
+                            </div>
                         </div>
-                        <div class="text-gray-400">
-                            Budget: ${(parseFloat(pair.purchaseAmount) * pair.maxPurchases).toLocaleString()}
-                        </div>
-                    </div>
 
-                    <div class="bg-slate-700 rounded-full h-2">
-                        <div class="bg-purple-500 h-2 rounded-full transition-all" 
-                             style="width: ${((pair.purchaseCount || 0) / pair.maxPurchases) * 100}%"></div>
+                        <div class="bg-slate-700 rounded-full h-2">
+                            <div class="bg-purple-500 h-2 rounded-full transition-all" 
+                                 style="width: ${((pair.purchaseCount || 0) / pair.maxPurchases) * 100}%"></div>
+                        </div>
                     </div>
                 </div>
-            `).join('');
+            `}).join('');
         }
 
         // Update pair config
