@@ -21,6 +21,12 @@
                 <p class="text-xs text-gray-500 mt-1">💡 Configuration : Modifiez le fichier .env puis redémarrez le serveur</p>
             </div>
             <div class="flex gap-4">
+                <button onclick="refreshData()" class="px-6 py-3 bg-slate-700 hover:bg-slate-600 rounded-lg font-semibold transition">
+                    🔄 Actualiser
+                </button>
+                <button onclick="sellAllPositions()" class="px-6 py-3 bg-orange-600 hover:bg-orange-500 rounded-lg font-semibold transition">
+                    💰 Vendre Tout
+                </button>
                 <button id="startStopBtn" onclick="toggleBot()" class="px-6 py-3 bg-green-600 hover:bg-green-500 rounded-lg font-semibold transition">
                     ▶️ Démarrer
                 </button>
@@ -124,7 +130,26 @@
                 const res = await fetch(`${API_URL}/api/config`);
                 const data = await res.json();
                 config = data;
-                pairs = data.pairs;
+                
+                // Ne pas écraser les paires si on a déjà des données
+                if (pairs.length === 0) {
+                    pairs = data.pairs;
+                }
+                
+                // Toujours charger l'état actuel des paires depuis l'API
+                const pairsRes = await fetch(`${API_URL}/api/pairs`);
+                const pairsState = await pairsRes.json();
+                
+                console.log('État des paires chargé:', pairsState);
+                
+                // Fusionner les configs avec l'état actuel
+                pairs = data.pairs.map(configPair => {
+                    const statePair = pairsState.find(p => p.id === configPair.id);
+                    return {
+                        ...configPair,
+                        ...statePair
+                    };
+                });
                 
                 renderPairs();
                 updateStats();
@@ -426,6 +451,94 @@
                 addLog('error', `❌ Erreur: ${error.message}`);
             }
         }
+
+        // Sell all positions
+        async function sellAllPositions() {
+            const pairsWithBalance = pairs.filter(p => parseFloat(p.balance || 0) > 0);
+            
+            if (pairsWithBalance.length === 0) {
+                addLog('error', '❌ Aucune position à vendre');
+                return;
+            }
+
+            const totalValue = pairsWithBalance.reduce((sum, p) => {
+                const value = parseFloat(p.balance) * (p.currentPrice || 0);
+                return sum + value;
+            }, 0);
+
+            const message = `Vendre TOUTES les positions ?\n\n` +
+                pairsWithBalance.map(p => {
+                    const value = (parseFloat(p.balance) * (p.currentPrice || 0)).toFixed(2);
+                    return `• ${p.name}: ${parseFloat(p.balance).toFixed(4)} (~${value})`;
+                }).join('\n') +
+                `\n\nValeur totale estimée: ~${totalValue.toFixed(2)}`;
+
+            if (!confirm(message)) {
+                return;
+            }
+
+            addLog('info', '🔄 Vente de toutes les positions en cours...');
+
+            let successCount = 0;
+            let totalUSDC = 0;
+
+            for (const pair of pairsWithBalance) {
+                addLog('info', `⏳ Vente de ${pair.name}...`);
+                
+                try {
+                    const res = await fetch(`${API_URL}/api/sell`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ pairId: pair.id, percentage: 100 })
+                    });
+
+                    const data = await res.json();
+
+                    if (data.success) {
+                        successCount++;
+                        totalUSDC += parseFloat(data.usdcReceived);
+                        addLog('success', `✅ ${pair.name}: ${data.amountSold} → ${data.usdcReceived} USDC`);
+                    } else {
+                        addLog('error', `❌ ${pair.name}: ${data.error}`);
+                    }
+                } catch (error) {
+                    addLog('error', `❌ ${pair.name}: ${error.message}`);
+                }
+
+                // Attendre un peu entre chaque vente
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+
+            addLog('success', `🎉 Vente terminée: ${successCount}/${pairsWithBalance.length} positions vendues`);
+            addLog('success', `💵 Total reçu: ${totalUSDC.toFixed(2)} USDC`);
+
+            // Mettre à jour l'interface
+            setTimeout(() => {
+                fetch(`${API_URL}/api/pairs`)
+                    .then(r => r.json())
+                    .then(pairsData => updatePairs(pairsData));
+            }, 2000);
+        }
+
+        // Refresh data manually
+        async function refreshData() {
+            addLog('info', '🔄 Actualisation des données...');
+            try {
+                const pairsRes = await fetch(`${API_URL}/api/pairs`);
+                const pairsState = await pairsRes.json();
+                updatePairs(pairsState);
+                addLog('success', '✅ Données actualisées');
+            } catch (error) {
+                addLog('error', `❌ Erreur actualisation: ${error.message}`);
+            }
+        }
+
+        // Auto-refresh every 30 seconds when not running
+        setInterval(() => {
+            if (!isRunning) {
+                refreshData();
+            }
+        }, 30000);
 
         // Clear logs
         function clearLogs() {
