@@ -26,6 +26,7 @@ app.use(express.static('public'));
 
 // Fichier de sauvegarde de l'état
 const STATE_FILE = path.join(__dirname, 'bot-state.json');
+const PAIRS_FILE = path.join(__dirname, 'pairs.json');
 
 // ==================== STATE MANAGEMENT ====================
 function saveState(pairs) {
@@ -80,80 +81,28 @@ let CONFIG = {
   USDC: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
 };
 
-let PAIRS = [
-  {
-    id: 1,
-    name: 'WBTC',
-    address: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f',
-    decimals: 8,
-    purchaseAmount: CONFIG.AMOUNT_1,
-    maxPurchases: 10,
-    dropPercentage: 2,
-    fee: 3000,
-    enabled: true,
-    category: 1
-  },
-  {
-    id: 2,
-    name: 'WETH',
-    address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
-    decimals: 18,
-    purchaseAmount: CONFIG.AMOUNT_1,
-    maxPurchases: 15,
-    dropPercentage: 2,
-    fee: 500,
-    enabled: true,
-    category: 1
-  },
-  {
-    id: 3,
-    name: 'LINK',
-    address: '0xf97f4df75117a78c1A5a0DBb814Af92458539FB4',
-    decimals: 18,
-    purchaseAmount: CONFIG.AMOUNT_2,
-    maxPurchases: 20,
-    dropPercentage: 2,
-    fee: 3000,
-    enabled: true,
-    category: 2
-  },
-  {
-    id: 4,
-    name: 'AAVE',
-    address: '0xba5DdD1f9d7F570dc94a51479a000E3BCE967196',
-    decimals: 18,
-    purchaseAmount: CONFIG.AMOUNT_2,
-    maxPurchases: 12,
-    dropPercentage: 2,
-    fee: 3000,
-    enabled: true,
-    category: 2
-  },
-  {
-    id: 5,
-    name: 'UNI',
-    address: '0xFa7F8980b0f1E64A2062791cc3b0871572f1F7f0',
-    decimals: 18,
-    purchaseAmount: CONFIG.AMOUNT_2,
-    maxPurchases: 10,
-    dropPercentage: 2,
-    fee: 3000,
-    enabled: true,
-    category: 2
-  },
-  {
-    id: 6,
-    name: 'LDO',
-    address: '0x13Ad51ed4F1B7e9Dc168d8a00cB3f4dDD85EfA60',
-    decimals: 18,
-    purchaseAmount: CONFIG.AMOUNT_2,
-    maxPurchases: 15,
-    dropPercentage: 2,
-    fee: 3000,
-    enabled: true,
-    category: 2
+function loadPairsConfig() {
+  try {
+    if (fs.existsSync(PAIRS_FILE)) {
+      const data = fs.readFileSync(PAIRS_FILE, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error('❌ Erreur chargement config paires:', error.message);
   }
-];
+  return [];
+}
+
+function savePairsConfig(pairs) {
+  try {
+    fs.writeFileSync(PAIRS_FILE, JSON.stringify(pairs, null, 2));
+    console.log('💾 Configuration des paires sauvegardée');
+  } catch (error) {
+    console.error('❌ Erreur sauvegarde config paires:', error.message);
+  }
+}
+
+let PAIRS = loadPairsConfig();
 
 // ABIs
 const ERC20_ABI = [
@@ -185,6 +134,7 @@ class PairTracker {
     this.balance = '0';
     this.totalSpent = 0; // Total dépensé en USDC
     this.averagePrice = null; // Prix moyen d'achat
+    this.purchaseAmount = CONFIG[this.config.purchaseAmountKey];
   }
 
   // Restaurer l'état depuis la sauvegarde
@@ -201,7 +151,7 @@ class PairTracker {
 
   async getCurrentPrice() {
     try {
-      const amountIn = ethers.parseUnits(this.config.purchaseAmount, 6);
+      const amountIn = ethers.parseUnits(this.purchaseAmount, 6);
       
       const params = {
         tokenIn: CONFIG.USDC,
@@ -214,7 +164,7 @@ class PairTracker {
       const quote = await this.contracts.quoter.quoteExactInputSingle.staticCall(params);
       const tokenOut = quote[0];
       
-      const pricePerToken = parseFloat(this.config.purchaseAmount) / 
+      const pricePerToken = parseFloat(this.purchaseAmount) / 
                            parseFloat(ethers.formatUnits(tokenOut, this.config.decimals));
       
       this.currentPrice = pricePerToken;
@@ -337,13 +287,13 @@ class PairTracker {
     try {
       this.emitLog('info', `[${this.config.name}] 🔄 Exécution de l'achat...`);
       
-      const amountIn = ethers.parseUnits(this.config.purchaseAmount, 6);
+      const amountIn = ethers.parseUnits(this.purchaseAmount, 6);
       
       // Vérifier la balance USDC avant d'acheter
       const usdcBalance = await this.contracts.usdc.balanceOf(this.contracts.wallet.address);
       if (usdcBalance < amountIn) {
         const usdcFormatted = ethers.formatUnits(usdcBalance, 6);
-        throw new Error(`Balance USDC insuffisante: ${usdcFormatted} USDC disponible, ${this.config.purchaseAmount} USDC requis`);
+        throw new Error(`Balance USDC insuffisante: ${usdcFormatted} USDC disponible, ${this.purchaseAmount} USDC requis`);
       }
       
       const allowance = await this.contracts.usdc.allowance(
@@ -390,7 +340,7 @@ class PairTracker {
       await this.getBalance();
       
       // Calculer le prix moyen
-      this.totalSpent += parseFloat(this.config.purchaseAmount);
+      this.totalSpent += parseFloat(this.purchaseAmount);
       const balanceNumber = parseFloat(this.balance);
       if (balanceNumber > 0) {
         this.averagePrice = this.totalSpent / balanceNumber;
@@ -647,7 +597,10 @@ app.get('/api/config', (req, res) => {
       rpcUrl: CONFIG.RPC_URL ? '***configured***' : '',
       privateKey: CONFIG.PRIVATE_KEY ? '***configured***' : ''
     },
-    pairs: PAIRS
+    pairs: PAIRS.map(p => ({
+      ...p,
+      purchaseAmount: CONFIG[p.purchaseAmountKey] || p.purchaseAmount // Retourner le montant réel basé sur CONFIG
+    }))
   });
 });
 
@@ -668,12 +621,16 @@ app.post('/api/config', (req, res) => {
   }
 
   if (pairs) {
-    PAIRS = pairs.map((p, index) => ({
-      ...PAIRS[index],
-      ...p,
-      enabled: p.enabled // S'assurer que enabled est bien synchronisé
-    }));
-    console.log('✅ Configuration des paires mise à jour');
+    PAIRS = pairs.map(p => {
+      const existingPair = PAIRS.find(ep => ep.id === p.id);
+      return {
+        ...existingPair,
+        ...p,
+        purchaseAmount: CONFIG[p.purchaseAmountKey] || p.purchaseAmount // Utiliser la valeur de CONFIG si purchaseAmountKey est présent
+      };
+    });
+    savePairsConfig(PAIRS);
+    console.log('✅ Configuration des paires mise à jour et sauvegardée');
   }
 
   res.json({ success: true });
@@ -715,7 +672,8 @@ app.get('/api/pairs', (req, res) => {
       dropPercentage: p.dropPercentage,
       averagePrice: null,
       totalSpent: 0,
-      priceChange: 0
+      priceChange: 0,
+      purchaseAmount: CONFIG[p.purchaseAmountKey] || '0' // Utiliser la clé pour obtenir le montant
     }));
     return res.json(emptyState);
   }
