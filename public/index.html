@@ -37,7 +37,7 @@
         <!-- Supprimé: Configuration via .env uniquement -->
 
         <!-- Stats -->
-        <div class="grid grid-cols-4 gap-4 mb-6">
+        <div class="grid grid-cols-5 gap-4 mb-6">
             <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
                 <div class="text-gray-400 text-sm mb-1">Budget Total Max</div>
                 <div class="text-2xl font-bold" id="totalBudget">$0</div>
@@ -55,6 +55,10 @@
                 <div class="text-2xl font-bold flex items-center gap-2" id="status">
                     <div class="w-3 h-3 bg-gray-500 rounded-full"></div> Arrêté
                 </div>
+            </div>
+            <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+                <div class="text-gray-400 text-sm mb-1">P&L Global</div>
+                <div class="text-2xl font-bold" id="globalPnl">0.00%</div>
             </div>
         </div>
 
@@ -169,6 +173,13 @@
                 
                 if (res.ok) {
                     addLog('success', '✅ Configuration des paires sauvegardée');
+                    // Remove all saving indicators
+                    for (const pairId in savingIndicators) {
+                        if (savingIndicators[pairId]) {
+                            savingIndicators[pairId].remove();
+                        }
+                    }
+                    Object.keys(savingIndicators).forEach(key => delete savingIndicators[key]);
                 }
             } catch (error) {
                 addLog('error', `Erreur de sauvegarde: ${error.message}`);
@@ -226,15 +237,154 @@
             updateStats();
         }
 
+        // --- Render Helpers ---
+
+        function calculatePairMetrics(pair) {
+            const pnl = pair.averagePrice && pair.currentPrice ? ((pair.currentPrice - pair.averagePrice) / pair.averagePrice) * 100 : 0;
+            const pnlColor = pnl >= 0 ? 'text-green-400' : 'text-red-400';
+            const athDrop = pair.ath && pair.currentPrice ? ((pair.currentPrice - pair.ath) / pair.ath) * 100 : 0;
+            
+            // Use last purchase price for target, fallback to current price if it doesn't exist
+            const basePriceForTarget = pair.lastPurchasePrice || pair.currentPrice;
+            const targetPrice = basePriceForTarget ? basePriceForTarget * (1 - ((pair.dropPercentage || 0) / 100)) : 0;
+            
+            const readyToBuy = pair.currentPrice && targetPrice ? pair.currentPrice <= targetPrice : false;
+
+            return { pnl, pnlColor, athDrop, targetPrice, readyToBuy };
+        }
+
+        function createInfoSectionHTML(pair, metrics) {
+            if (!pair.currentPrice) {
+                return `
+                <div class="p-3 bg-blue-900/30 border border-blue-600 rounded">
+                    <div class="text-sm text-blue-300">⏳ En attente de données...</div>
+                </div>`;
+            }
+
+            return `
+            <div class="space-y-3">
+                <!-- Ligne 1: Prix actuel | ATH -->
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="p-3 bg-slate-700 rounded">
+                        <div class="text-sm text-gray-400">Prix actuel</div>
+                        <div class="text-xl font-bold">${pair.currentPrice.toFixed(2)}</div>
+                    </div>
+                    <div class="p-3 bg-slate-700 rounded border border-orange-500">
+                        <div class="text-sm text-orange-400">ATH 🔥</div>
+                        <div class="text-xl font-bold text-orange-400">${(pair.ath || 0).toFixed(2)}</div>
+                    </div>
+                </div>
+
+                <!-- Ligne 2: Prix moyen & P&L -->
+                ${pair.averagePrice ? `
+                <div class="p-3 rounded bg-slate-700 border border-blue-500">
+                    <div class="flex items-center justify-between">
+                        <div class="text-sm text-blue-300">Prix moyen</div>
+                        <div class="text-lg font-bold">${pair.averagePrice.toFixed(2)}</div>
+                    </div>
+                    <div class="flex items-center justify-between mt-1">
+                        <div class="text-sm text-gray-400">P&L</div>
+                        <div class="text-lg font-bold ${metrics.pnlColor}">${metrics.pnl.toFixed(2)}%</div>
+                    </div>
+                </div>
+                ` : ''}
+
+                <!-- Ligne 3: Variation ATH + Objectif -->
+                <div class="p-3 rounded ${metrics.readyToBuy ? 'bg-green-900/30 border border-green-600' : 'bg-slate-700'}">
+                    <div class="flex items-center justify-between">
+                        <div class="text-sm ${metrics.readyToBuy ? 'text-green-300' : 'text-gray-300'}">
+                            ${metrics.readyToBuy ? '🎯 Prêt à acheter!' : `Depuis ATH: <span class="font-bold text-red-400">${metrics.athDrop.toFixed(2)}%</span>`}
+                        </div>
+                        <div class="text-sm text-gray-400">
+                            Objectif: <span class="font-bold">${metrics.targetPrice.toFixed(2)}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        function createSellSectionHTML(pair) {
+            if (parseFloat(pair.balance || 0) <= 0.0001) return '';
+            
+            return `
+            <div class="mt-6 bg-slate-900/50 rounded-lg p-4 border border-slate-700">
+                <div class="flex items-center justify-between mb-3">
+                    <h4 class="font-bold text-md">Vendre ${pair.name}</h4>
+                    <span id="sell-label-${pair.id}" class="text-sm font-bold text-purple-400">0%</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <input type="range" id="sell-range-${pair.id}" min="0" max="100" value="0" step="1" 
+                           oninput="
+                                document.getElementById('sell-label-${pair.id}').textContent = this.value + '%';
+                                const amount = (parseFloat(${pair.balance || 0}) * this.value / 100).toFixed(4);
+                                document.getElementById('sell-amount-${pair.id}').textContent = amount;
+                           "
+                           class="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500">
+                    <button onclick="sellTokens(${pair.id})" class="px-4 py-2 bg-orange-600 hover:bg-orange-500 rounded-lg font-semibold text-sm transition">
+                        Vendre
+                    </button>
+                </div>
+                <div class="text-xs text-gray-500 mt-2 text-center">
+                    Montant : <span id="sell-amount-${pair.id}">0.0000</span> ${pair.name}
+                </div>
+            </div>`;
+        }
+
+        function createConfigSectionHTML(pair) {
+            return `
+            <div class="mt-6">
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">Montant (USDC)</label>
+                        <input type="number" value="${pair.purchaseAmount}" 
+                               onchange="updatePairConfig(${pair.id}, 'purchaseAmount', this.value, this)"
+                               ${isRunning ? 'disabled' : ''}
+                               class="w-full px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">Max Achats</label>
+                        <input type="number" value="${pair.maxPurchases}" 
+                               onchange="updatePairConfig(${pair.id}, 'maxPurchases', this.value, this)"
+                               ${isRunning ? 'disabled' : ''}
+                               class="w-full px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none">
+                    </div>
+                    <div class="col-span-2">
+                        <label class="block text-xs text-gray-400 mb-1">% Baisse déclenchement</label>
+                        <div class="flex items-center gap-2">
+                            <input type="number" 
+                                   value="${pair.dropPercentage || 2}" 
+                                   step="0.1"
+                                   min="0.1"
+                                   max="20"
+                                   onchange="updatePairConfig(${pair.id}, 'dropPercentage', parseFloat(this.value), this)"
+                                   ${isRunning ? 'disabled' : ''}
+                                   class="flex-1 px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none">
+                            <span class="text-sm text-gray-400">%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-between text-sm mb-3">
+                    <div class="text-gray-400">
+                        Achats: ${pair.purchaseCount || 0}/${pair.maxPurchases}
+                    </div>
+                    <div class="text-gray-400">
+                        Budget: ${(parseFloat(pair.purchaseAmount) * pair.maxPurchases).toLocaleString()}
+                    </div>
+                </div>
+
+                <div class="bg-slate-700 rounded-full h-2">
+                    <div class="bg-purple-500 h-2 rounded-full transition-all" 
+                         style="width: ${((pair.purchaseCount || 0) / pair.maxPurchases) * 100}%"></div>
+                </div>
+            </div>`;
+        }
+
         // Render pairs
         function renderPairs() {
             const grid = document.getElementById('pairsGrid');
             grid.innerHTML = pairs.map(pair => {
-                const pnl = pair.averagePrice && pair.currentPrice ? ((pair.currentPrice - pair.averagePrice) / pair.averagePrice) * 100 : 0;
-                const pnlColor = pnl >= 0 ? 'text-green-400' : 'text-red-400';
-                const athDrop = pair.ath && pair.currentPrice ? ((pair.currentPrice - pair.ath) / pair.ath) * 100 : 0;
-                const targetPrice = pair.lastPurchasePrice ? pair.lastPurchasePrice * (1 - (pair.dropPercentage / 100)) : pair.currentPrice * (1 - (pair.dropPercentage / 100));
-                const readyToBuy = pair.currentPrice <= targetPrice;
+                const metrics = calculatePairMetrics(pair);
 
                 return `
                 <div class="bg-slate-800 rounded-lg p-6 border-2 ${pair.enabled ? 'border-purple-500' : 'border-slate-700 opacity-50'}">
@@ -250,98 +400,9 @@
                         </button>
                     </div>
 
-                    ${pair.currentPrice ? `
-                        <div class="space-y-3">
-                            <!-- Ligne 1: Prix actuel | ATH -->
-                            <div class="grid grid-cols-2 gap-3">
-                                <div class="p-3 bg-slate-700 rounded">
-                                    <div class="text-sm text-gray-400">Prix actuel</div>
-                                    <div class="text-xl font-bold">${pair.currentPrice.toFixed(2)}</div>
-                                </div>
-                                <div class="p-3 bg-slate-700 rounded border border-orange-500">
-                                    <div class="text-sm text-orange-400">ATH 🔥</div>
-                                    <div class="text-xl font-bold text-orange-400">${(pair.ath || 0).toFixed(2)}</div>
-                                </div>
-                            </div>
-
-                            <!-- Ligne 2: Prix moyen & P&L -->
-                            ${pair.averagePrice ? `
-                            <div class="p-3 rounded bg-slate-700 border border-blue-500">
-                                <div class="flex items-center justify-between">
-                                    <div class="text-sm text-blue-300">Prix moyen</div>
-                                    <div class="text-lg font-bold">${pair.averagePrice.toFixed(2)}</div>
-                                </div>
-                                <div class="flex items-center justify-between mt-1">
-                                    <div class="text-sm text-gray-400">P&L</div>
-                                    <div class="text-lg font-bold ${pnlColor}">${pnl.toFixed(2)}%</div>
-                                </div>
-                            </div>
-                            ` : ''}
-
-                            <!-- Ligne 3: Variation ATH + Objectif -->
-                            <div class="p-3 rounded ${readyToBuy ? 'bg-green-900/30 border border-green-600' : 'bg-slate-700'}">
-                                <div class="flex items-center justify-between">
-                                    <div class="text-sm ${readyToBuy ? 'text-green-300' : 'text-gray-300'}">
-                                        ${readyToBuy ? '🎯 Prêt à acheter!' : `Depuis ATH: <span class="font-bold text-red-400">${athDrop.toFixed(2)}%</span>`}
-                                    </div>
-                                    <div class="text-sm text-gray-400">
-                                        Objectif: <span class="font-bold">${targetPrice.toFixed(2)}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    ` : `
-                        <div class="p-3 bg-blue-900/30 border border-blue-600 rounded">
-                            <div class="text-sm text-blue-300">⏳ En attente de données...</div>
-                        </div>
-                    `}
-
-                    <div class="mt-6">
-                        <div class="grid grid-cols-2 gap-3 mb-4">
-                            <div>
-                                <label class="block text-xs text-gray-400 mb-1">Montant (USDC)</label>
-                                <input type="number" value="${pair.purchaseAmount}" 
-                                       onchange="updatePairConfig(${pair.id}, 'purchaseAmount', this.value)"
-                                       ${isRunning ? 'disabled' : ''}
-                                       class="w-full px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none">
-                            </div>
-                            <div>
-                                <label class="block text-xs text-gray-400 mb-1">Max Achats</label>
-                                <input type="number" value="${pair.maxPurchases}" 
-                                       onchange="updatePairConfig(${pair.id}, 'maxPurchases', this.value)"
-                                       ${isRunning ? 'disabled' : ''}
-                                       class="w-full px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none">
-                            </div>
-                            <div class="col-span-2">
-                                <label class="block text-xs text-gray-400 mb-1">% Baisse déclenchement</label>
-                                <div class="flex items-center gap-2">
-                                    <input type="number" 
-                                           value="${pair.dropPercentage || 2}" 
-                                           step="0.1"
-                                           min="0.1"
-                                           max="20"
-                                           onchange="updatePairConfig(${pair.id}, 'dropPercentage', parseFloat(this.value))"
-                                           ${isRunning ? 'disabled' : ''}
-                                           class="flex-1 px-3 py-2 bg-slate-700 rounded text-sm border border-slate-600 focus:border-purple-500 outline-none">
-                                    <span class="text-sm text-gray-400">%</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="flex items-center justify-between text-sm mb-3">
-                            <div class="text-gray-400">
-                                Achats: ${pair.purchaseCount || 0}/${pair.maxPurchases}
-                            </div>
-                            <div class="text-gray-400">
-                                Budget: ${(parseFloat(pair.purchaseAmount) * pair.maxPurchases).toLocaleString()}
-                            </div>
-                        </div>
-
-                        <div class="bg-slate-700 rounded-full h-2">
-                            <div class="bg-purple-500 h-2 rounded-full transition-all" 
-                                 style="width: ${((pair.purchaseCount || 0) / pair.maxPurchases) * 100}%"></div>
-                        </div>
-                    </div>
+                    ${createInfoSectionHTML(pair, metrics)}
+                    ${createSellSectionHTML(pair)}
+                    ${createConfigSectionHTML(pair)}
                 </div>
             `}).join('');
         }
@@ -375,15 +436,34 @@
 
         // Update stats
         function updateStats() {
-            const totalBudget = pairs.reduce((sum, p) => 
-                p.enabled ? sum + (parseFloat(p.purchaseAmount) * p.maxPurchases) : sum, 0
+            const enabledPairs = pairs.filter(p => p.enabled);
+            
+            const totalBudget = enabledPairs.reduce((sum, p) => 
+                sum + (parseFloat(p.purchaseAmount) * p.maxPurchases), 0
             );
-            const activePairs = pairs.filter(p => p.enabled).length;
+            const activePairsCount = enabledPairs.length;
             const totalPurchases = pairs.reduce((sum, p) => sum + (p.purchaseCount || 0), 0);
 
+            // Global P&L Calculation
+            const totalSpent = pairs.reduce((sum, p) => sum + (p.totalSpent || 0), 0);
+            const totalCurrentValue = pairs.reduce((sum, p) => {
+                const balance = parseFloat(p.balance) || 0;
+                const price = parseFloat(p.currentPrice) || 0;
+                return sum + (balance * price);
+            }, 0);
+
+            let globalPnl = 0;
+            if (totalSpent > 0) {
+                globalPnl = ((totalCurrentValue - totalSpent) / totalSpent) * 100;
+            }
+
             document.getElementById('totalBudget').textContent = `${totalBudget.toLocaleString()}`;
-            document.getElementById('activePairs').textContent = `${activePairs}/${pairs.length}`;
+            document.getElementById('activePairs').textContent = `${activePairsCount}/${pairs.length}`;
             document.getElementById('totalPurchases').textContent = totalPurchases;
+            
+            const pnlElement = document.getElementById('globalPnl');
+            pnlElement.textContent = `${globalPnl.toFixed(2)}%`;
+            pnlElement.className = `text-2xl font-bold ${globalPnl >= 0 ? 'text-green-400' : 'text-red-400'}`;
         }
 
         // Update status
@@ -572,11 +652,43 @@
 
         // Auto-save pairs config on change
         let saveTimeout;
-        function autoSave() {
+        const savingIndicators = {}; // Map to store saving indicator elements
+
+        function autoSave(pairId, inputElement) {
             clearTimeout(saveTimeout);
+
+            // Remove existing indicator for this pair if any
+            if (savingIndicators[pairId]) {
+                savingIndicators[pairId].remove();
+                delete savingIndicators[pairId];
+            }
+
+            // Add new saving indicator
+            const indicator = document.createElement('span');
+            indicator.className = 'text-xs text-gray-500 ml-2';
+            indicator.textContent = 'Sauvegarde...';
+            inputElement.parentNode.appendChild(indicator);
+            savingIndicators[pairId] = indicator;
+
             saveTimeout = setTimeout(() => {
                 saveConfig();
             }, 1000);
+        }
+
+        // Update pair config
+        function updatePairConfig(id, field, value, inputElement) {
+            const pair = pairs.find(p => p.id === id);
+            if (pair) {
+                if (field === 'purchaseAmount') {
+                    pair[field] = value;
+                } else if (field === 'dropPercentage') {
+                    pair[field] = parseFloat(value);
+                } else {
+                    pair[field] = parseInt(value);
+                }
+                updateStats();
+                autoSave(id, inputElement);
+            }
         }
 
         // Initialize
