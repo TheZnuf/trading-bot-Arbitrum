@@ -5,6 +5,8 @@ const { ethers } = require('ethers');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const logger = require('./logger');
+const notifier = require('./notifier');
 require('dotenv').config();
 
 const app = express();
@@ -36,17 +38,17 @@ function saveState(pairs) {
       pairs: pairs.map(p => ({
         id: p.config.id,
         name: p.config.name,
-        lastPurchasePrice: p.lastPurchasePrice,
-        ath: p.ath,
+        lastPurchasePrice: p.lastPurchasePrice ? p.lastPurchasePrice.toString() : null,
+        ath: p.ath ? p.ath.toString() : null,
         purchaseCount: p.purchaseCount,
-        totalSpent: p.totalSpent,
-        averagePrice: p.averagePrice
+        totalSpent: p.totalSpent.toString(),
+        averagePrice: p.averagePrice ? p.averagePrice.toString() : null
       }))
     };
     fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-    console.log('💾 État sauvegardé');
+    logger.info('💾 État sauvegardé');
   } catch (error) {
-    console.error('❌ Erreur sauvegarde état:', error.message);
+    logger.error('❌ Erreur sauvegarde état:', error);
   }
 }
 
@@ -55,11 +57,11 @@ function loadState() {
     if (fs.existsSync(STATE_FILE)) {
       const data = fs.readFileSync(STATE_FILE, 'utf8');
       const state = JSON.parse(data);
-      console.log('📂 État chargé depuis:', state.timestamp);
+      logger.info('📂 État chargé depuis: %s', state.timestamp);
       return state.pairs;
     }
   } catch (error) {
-    console.error('❌ Erreur chargement état:', error.message);
+    logger.error('❌ Erreur chargement état:', error);
   }
   return null;
 }
@@ -88,7 +90,7 @@ function loadPairsConfig() {
       return JSON.parse(data);
     }
   } catch (error) {
-    console.error('❌ Erreur chargement config paires:', error.message);
+    logger.error('❌ Erreur chargement config paires:', error);
   }
   return [];
 }
@@ -96,9 +98,9 @@ function loadPairsConfig() {
 function savePairsConfig(pairs) {
   try {
     fs.writeFileSync(PAIRS_FILE, JSON.stringify(pairs, null, 2));
-    console.log('💾 Configuration des paires sauvegardée');
+    logger.info('💾 Configuration des paires sauvegardée');
   } catch (error) {
-    console.error('❌ Erreur sauvegarde config paires:', error.message);
+    logger.error('❌ Erreur sauvegarde config paires:', error);
   }
 }
 
@@ -127,25 +129,26 @@ class PairTracker {
     this.config = config;
     this.contracts = contracts;
     this.emitLog = emitLog;
-    this.lastPurchasePrice = null;
-    this.ath = null; // ATH depuis le dernier achat
+    this.lastPurchasePrice = null; // BigInt with 18 decimals
+    this.ath = null; // BigInt with 18 decimals
     this.purchaseCount = 0;
-    this.currentPrice = null;
+    this.currentPrice = null; // BigInt with 18 decimals
     this.balance = '0';
-    this.totalSpent = 0; // Total dépensé en USDC
-    this.averagePrice = null; // Prix moyen d'achat
+    this.rawBalance = 0n;
+    this.totalSpent = 0n; // BigInt in USDC units (6 decimals)
+    this.averagePrice = null; // BigInt with 18 decimals
     this.purchaseAmount = CONFIG[this.config.purchaseAmountKey];
   }
 
   // Restaurer l'état depuis la sauvegarde
   restoreState(savedState) {
     if (savedState) {
-      this.lastPurchasePrice = savedState.lastPurchasePrice;
-      this.ath = savedState.ath;
+      this.lastPurchasePrice = savedState.lastPurchasePrice ? BigInt(savedState.lastPurchasePrice) : null;
+      this.ath = savedState.ath ? BigInt(savedState.ath) : null;
       this.purchaseCount = savedState.purchaseCount;
-      this.totalSpent = savedState.totalSpent || 0;
-      this.averagePrice = savedState.averagePrice || null;
-      this.emitLog('success', `[${this.config.name}] 📂 État restauré: ${this.purchaseCount} achats, ATH: ${this.ath ? this.ath.toFixed(2) : 'N/A'}, Prix moyen: ${this.averagePrice ? this.averagePrice.toFixed(2) : 'N/A'}`);
+      this.totalSpent = savedState.totalSpent ? BigInt(savedState.totalSpent) : 0n;
+      this.averagePrice = savedState.averagePrice ? BigInt(savedState.averagePrice) : null;
+      this.emitLog('success', `[${this.config.name}] 📂 État restauré: ${this.purchaseCount} achats, ATH: ${this.ath ? parseFloat(ethers.formatUnits(this.ath, 18)).toFixed(2) : 'N/A'}, Prix moyen: ${this.averagePrice ? parseFloat(ethers.formatUnits(this.averagePrice, 18)).toFixed(2) : 'N/A'}`);
     }
   }
 
@@ -163,19 +166,24 @@ class PairTracker {
       
       const quote = await this.contracts.quoter.quoteExactInputSingle.staticCall(params);
       const tokenOut = quote[0];
+
+      if (tokenOut === 0n) {
+        this.emitLog('error', `[${this.config.name}] Erreur prix: Le quoter a retourné 0`);
+        return null;
+      }
+
+      // Prix avec 18 décimales de précision
+      const pricePerTokenBN = (amountIn * (10n ** BigInt(this.config.decimals)) * (10n ** 18n)) / (tokenOut * (10n ** 6n));
       
-      const pricePerToken = parseFloat(this.purchaseAmount) / 
-                           parseFloat(ethers.formatUnits(tokenOut, this.config.decimals));
-      
-      this.currentPrice = pricePerToken;
+      this.currentPrice = pricePerTokenBN;
       
       // Mettre à jour l'ATH si le prix actuel est plus élevé
-      if (this.ath !== null && pricePerToken > this.ath) {
-        this.ath = pricePerToken;
-        this.emitLog('info', `[${this.config.name}] 🔥 Nouveau ATH: ${this.ath.toFixed(4)} USDC`);
+      if (this.ath !== null && pricePerTokenBN > this.ath) {
+        this.ath = pricePerTokenBN;
+        this.emitLog('info', `[${this.config.name}] 🔥 Nouveau ATH: ${ethers.formatUnits(this.ath, 18)} USDC`);
       }
       
-      return pricePerToken;
+      return pricePerTokenBN;
     } catch (error) {
       this.emitLog('error', `[${this.config.name}] Erreur prix: ${error.message}`);
       return null;
@@ -186,6 +194,7 @@ class PairTracker {
     try {
       const tokenContract = new ethers.Contract(this.config.address, ERC20_ABI, this.contracts.wallet);
       const balance = await tokenContract.balanceOf(this.contracts.wallet.address);
+      this.rawBalance = balance;
       this.balance = ethers.formatUnits(balance, this.config.decimals);
       return this.balance;
     } catch (error) {
@@ -253,7 +262,8 @@ class PairTracker {
       await tx.wait();
       
       const usdcReceived = ethers.formatUnits(usdcOut, 6);
-      const sellPrice = parseFloat(usdcReceived) / parseFloat(ethers.formatUnits(amountToSell, this.config.decimals));
+      const sellPriceBN = (usdcOut * (10n ** BigInt(this.config.decimals)) * (10n ** 18n)) / (amountToSell * (10n ** 6n));
+      const sellPrice = parseFloat(ethers.formatUnits(sellPriceBN, 18));
       
       this.emitLog('success', `[${this.config.name}] ✅ Vente confirmée!`);
       this.emitLog('success', 
@@ -262,10 +272,10 @@ class PairTracker {
 
       // Calculer le profit/perte si on a un prix moyen
       if (this.averagePrice) {
-        const profitPercent = ((sellPrice - this.averagePrice) / this.averagePrice) * 100;
+        const profitPercent = Number((sellPriceBN - this.averagePrice) * 10000n / this.averagePrice) / 100;
         const profitEmoji = profitPercent > 0 ? '📈' : '📉';
         this.emitLog('success', 
-          `[${this.config.name}] ${profitEmoji} P&L: ${profitPercent > 0 ? '+' : ''}${profitPercent.toFixed(2)}% (Prix moyen: ${this.averagePrice.toFixed(2)})`
+          `[${this.config.name}] ${profitEmoji} P&L: ${profitPercent > 0 ? '+' : ''}${profitPercent.toFixed(2)}% (Prix moyen: ${parseFloat(ethers.formatUnits(this.averagePrice, 18)).toFixed(2)})`
         );
       }
 
@@ -337,17 +347,16 @@ class PairTracker {
       this.purchaseCount++;
       this.lastPurchasePrice = await this.getCurrentPrice();
       this.ath = this.lastPurchasePrice; // Réinitialiser l'ATH au prix d'achat
-      await this.getBalance();
       
-      // Calculer le prix moyen
-      this.totalSpent += parseFloat(this.purchaseAmount);
-      const balanceNumber = parseFloat(this.balance);
-      if (balanceNumber > 0) {
-        this.averagePrice = this.totalSpent / balanceNumber;
+      // Mettre à jour la balance et calculer le prix moyen
+      this.totalSpent += ethers.parseUnits(this.purchaseAmount, 6);
+      await this.getBalance(); // Met à jour this.rawBalance
+      if (this.rawBalance > 0n) {
+        this.averagePrice = (this.totalSpent * (10n ** BigInt(this.config.decimals)) * (10n ** 18n)) / (this.rawBalance * (10n ** 6n));
       }
       
       this.emitLog('success', 
-        `[${this.config.name}] 📊 Achat #${this.purchaseCount} - Prix: ${this.lastPurchasePrice.toFixed(4)} USDC - Balance: ${this.balance} - Prix moyen: ${this.averagePrice ? this.averagePrice.toFixed(4) : 'N/A'} USDC`
+        `[${this.config.name}] 📊 Achat #${this.purchaseCount} - Prix: ${parseFloat(ethers.formatUnits(this.lastPurchasePrice, 18)).toFixed(4)} USDC - Balance: ${this.balance} - Prix moyen: ${this.averagePrice ? parseFloat(ethers.formatUnits(this.averagePrice, 18)).toFixed(4) : 'N/A'} USDC`
       );
       
       // Sauvegarder l'état après chaque achat
@@ -399,34 +408,36 @@ class PairTracker {
     
     // L'ATH a déjà été mis à jour dans getCurrentPrice() si nécessaire
     
-    // Calculer la baisse depuis l'ATH
-    const dropFromATH = this.ath ? ((currentPrice - this.ath) / this.ath) * 100 : 0;
-    const dropThreshold = this.config.dropPercentage || CONFIG.DROP_PERCENTAGE;
+    // Calculer la baisse depuis l'ATH en BigInt (pourcentage * 100 pour 2 décimales de précision)
+    const dropFromATH = this.ath ? ((currentPrice - this.ath) * 10000n) / this.ath : 0n;
+    const dropThreshold = BigInt((this.config.dropPercentage || CONFIG.DROP_PERCENTAGE) * 100);
     
     // Vérifier si baisse >= seuil depuis l'ATH
     if (dropFromATH <= -dropThreshold) {
       this.emitLog('success', 
-        `[${this.config.name}] 🎯 Déclenchement! Prix actuel: ${currentPrice.toFixed(4)}, ATH: ${this.ath.toFixed(4)}, Baisse: ${Math.abs(dropFromATH).toFixed(2)}%`
+        `[${this.config.name}] 🎯 Déclenchement! Prix actuel: ${parseFloat(ethers.formatUnits(currentPrice, 18)).toFixed(4)}, ATH: ${parseFloat(ethers.formatUnits(this.ath, 18)).toFixed(4)}, Baisse: ${Math.abs(Number(dropFromATH) / 100).toFixed(2)}%`
       );
       await this.executePurchase();
     }
   }
 
   getState() {
+    const priceChange = this.ath && this.currentPrice && this.ath > 0n
+      ? Number((this.currentPrice - this.ath) * 10000n / this.ath) / 100
+      : 0;
+
     return {
       id: this.config.id,
       name: this.config.name,
-      currentPrice: this.currentPrice,
-      lastPurchasePrice: this.lastPurchasePrice,
-      ath: this.ath,
+      currentPrice: this.currentPrice ? ethers.formatUnits(this.currentPrice, 18) : null,
+      lastPurchasePrice: this.lastPurchasePrice ? ethers.formatUnits(this.lastPurchasePrice, 18) : null,
+      ath: this.ath ? ethers.formatUnits(this.ath, 18) : null,
       purchaseCount: this.purchaseCount,
       balance: this.balance,
       dropPercentage: this.config.dropPercentage,
-      averagePrice: this.averagePrice,
-      totalSpent: this.totalSpent,
-      priceChange: this.ath && this.currentPrice 
-        ? ((this.currentPrice - this.ath) / this.ath) * 100 
-        : 0
+      averagePrice: this.averagePrice ? ethers.formatUnits(this.averagePrice, 18) : null,
+      totalSpent: ethers.formatUnits(this.totalSpent, 6),
+      priceChange: priceChange
     };
   }
 }
@@ -449,6 +460,12 @@ class BotManager {
       message
     };
     io.emit('log', log);
+
+    // Envoyer une notification Telegram pour les erreurs et succès
+    if (type === 'error' || type === 'success') {
+      let telegramMessage = `<b>${log.type.toUpperCase()}</b>: ${log.message}`;
+      notifier.sendTelegramMessage(telegramMessage);
+    }
   }
 
   async init() {
@@ -537,13 +554,13 @@ class BotManager {
       
       // Calculer le besoin minimum (une transaction par paire activée)
       const enabledPairs = this.pairs.filter(p => p.config.enabled);
-      const minRequired = enabledPairs.reduce((sum, p) => sum + parseFloat(p.config.purchaseAmount), 0);
+      const minRequired = enabledPairs.reduce((sum, p) => sum + ethers.parseUnits(p.purchaseAmount, 6), 0n);
       
-      if (parseFloat(usdcFormatted) < minRequired) {
-        this.emitLog('error', `⚠️ Balance USDC faible: ${usdcFormatted} USDC (min recommandé: ${minRequired} USDC)`);
+      if (usdcBalance < minRequired) {
+        this.emitLog('error', `⚠️ Balance USDC faible: ${usdcFormatted} USDC (min recommandé: ${ethers.formatUnits(minRequired, 6)} USDC)`);
       }
     } catch (error) {
-      console.error('Erreur vérification USDC:', error);
+      logger.error('Erreur vérification USDC:', error);
     }
     
     this.emitLog('info', '🔄 Vérification des prix...');
@@ -621,16 +638,20 @@ app.post('/api/config', (req, res) => {
   }
 
   if (pairs) {
+    // Mettre à jour la configuration en mémoire
     PAIRS = pairs.map(p => {
       const existingPair = PAIRS.find(ep => ep.id === p.id);
-      return {
-        ...existingPair,
-        ...p,
-        purchaseAmount: CONFIG[p.purchaseAmountKey] || p.purchaseAmount // Utiliser la valeur de CONFIG si purchaseAmountKey est présent
-      };
+      return { ...existingPair, ...p };
     });
-    savePairsConfig(PAIRS);
-    console.log('✅ Configuration des paires mise à jour et sauvegardée');
+
+    // Sauvegarder une version propre sans les champs dérivés
+    const pairsToSave = PAIRS.map(p => {
+      const { purchaseAmount, ...rest } = p; // 'purchaseAmount' est dérivé, on ne le sauvegarde pas
+      return rest;
+    });
+
+    savePairsConfig(pairsToSave);
+    logger.info('✅ Configuration des paires mise à jour et sauvegardée');
   }
 
   res.json({ success: true });
@@ -638,17 +659,17 @@ app.post('/api/config', (req, res) => {
 
 // Start bot
 app.post('/api/start', async (req, res) => {
-  console.log('📥 Requête de démarrage reçue');
+  logger.info('📥 Requête de démarrage reçue');
   const success = await botManager.start();
-  console.log(`📤 Réponse: ${success ? 'succès' : 'échec'}`);
+  logger.info(`📤 Réponse: ${success ? 'succès' : 'échec'}`);
   res.json({ success });
 });
 
 // Stop bot
 app.post('/api/stop', (req, res) => {
-  console.log('📥 Requête d\'arrêt reçue');
+  logger.info('📥 Requête d\'arrêt reçue');
   botManager.stop();
-  console.log('📤 Bot arrêté');
+  logger.info('📤 Bot arrêté');
   res.json({ success: true });
 });
 
@@ -700,13 +721,13 @@ app.post('/api/sell', async (req, res) => {
 
 // ==================== WEBSOCKET ====================
 io.on('connection', (socket) => {
-  console.log('✅ Client connecté:', socket.id);
+  logger.info('✅ Client connecté: %s', socket.id);
   
   socket.emit('status', botManager.getStatus());
   socket.emit('pairs-update', botManager.getPairsState());
 
   socket.on('disconnect', () => {
-    console.log('❌ Client déconnecté:', socket.id);
+    logger.info('❌ Client déconnecté: %s', socket.id);
   });
 });
 
@@ -715,16 +736,16 @@ const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0'; // Écoute sur toutes les interfaces
 
 server.listen(PORT, HOST, () => {
-  console.log(`🚀 Serveur démarré sur http://${HOST}:${PORT}`);
+  logger.info(`🚀 Serveur démarré sur http://${HOST}:${PORT}`);
   
   if (process.env.SERVER_URL) {
-    console.log(`🌐 URL publique: ${process.env.SERVER_URL}`);
+    logger.info(`🌐 URL publique: ${process.env.SERVER_URL}`);
   }
   
-  console.log(`📡 WebSocket disponible`);
-  console.log(`\n💡 Interface web: ${process.env.SERVER_URL || `http://localhost:${PORT}`}`);
-  console.log(`📋 Vérifiez votre fichier .env pour la configuration`);
-  console.log(`\n💰 Montants configurés:`);
-  console.log(`   - AMOUNT_1 (BTC, ETH): ${CONFIG.AMOUNT_1} USDC`);
-  console.log(`   - AMOUNT_2 (Autres): ${CONFIG.AMOUNT_2} USDC\n`);
+  logger.info(`📡 WebSocket disponible`);
+  logger.info(`\n💡 Interface web: ${process.env.SERVER_URL || `http://localhost:${PORT}`}`);
+  logger.info(`📋 Vérifiez votre fichier .env pour la configuration`);
+  logger.info(`\n💰 Montants configurés:`);
+  logger.info(`   - AMOUNT_1 (BTC, ETH): ${CONFIG.AMOUNT_1} USDC`);
+  logger.info(`   - AMOUNT_2 (Autres): ${CONFIG.AMOUNT_2} USDC\n`);
 });
